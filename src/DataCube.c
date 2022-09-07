@@ -5348,6 +5348,21 @@ PUBLIC DataCube *DataCube_create_pv(const DataCube *self, const double x0, const
 		DataCube_puthd_str(pv, "SPECSYS", value);
 	}
 	
+	// Write geometry into header
+	DataCube_puthd_flt(pv, "PVD_X", x0);
+	DataCube_puthd_flt(pv, "PVD_Y", y0);
+	WCS *wcs = DataCube_extract_wcs(self);
+	if(wcs != NULL)
+	{
+		double longitude = 0.0;
+		double latitude  = 0.0;
+		WCS_convertToWorld(wcs, x0, y0, 0.0, &longitude, &latitude, NULL);
+		DataCube_puthd_flt(pv, "PVD_LON", longitude);
+		DataCube_puthd_flt(pv, "PVD_LAT", latitude);
+	}
+	DataCube_puthd_flt(pv, "PVD_PA", 180.0 * angle / M_PI);
+	WCS_delete(wcs);
+	
 	// Extract PV diagram
 	for(size_t x = 0; x <= 2 * steps; ++x)
 	{
