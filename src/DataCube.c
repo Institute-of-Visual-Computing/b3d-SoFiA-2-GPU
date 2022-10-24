@@ -5596,6 +5596,7 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 		
 		// Create PV diagram
 		DataCube *pv = DataCube_create_pv(cubelet, Source_get_par_by_name_flt(src, "x") - x_min, Source_get_par_by_name_flt(src, "y") - y_min, Source_get_par_by_name_flt(src, "kin_pa") * M_PI / 180.0, 1.0, Source_get_identifier(src));
+		DataCube *pv_min = DataCube_create_pv(cubelet, Source_get_par_by_name_flt(src, "x") - x_min, Source_get_par_by_name_flt(src, "y") - y_min, Source_get_par_by_name_flt(src, "kin_pa") * M_PI / 180.0 + 90.0, 1.0, Source_get_identifier(src));
 		
 		// Save output products...
 		// ...cubelet
@@ -5665,6 +5666,15 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 			String_append(filename, "_pv.fits");
 			DataCube_add_history(pv, par);
 			DataCube_save(pv, String_get(filename), overwrite, DESTROY);
+		}
+		
+		if(pv_min != NULL)
+		{
+			String_set(filename, String_get(filename_template));
+			String_append_int(filename, "%ld", src_id);
+			String_append(filename, "_pv_min.fits");
+			DataCube_add_history(pv_min, par);
+			DataCube_save(pv_min, String_get(filename), overwrite, DESTROY);
 		}
 		
 		// ...spectrum
