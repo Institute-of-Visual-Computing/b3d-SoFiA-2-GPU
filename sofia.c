@@ -865,7 +865,7 @@ int main(int argc, char **argv)
 	// Write filtered cube          //
 	// ---------------------------- //
 	
-	if(write_filtered && (use_region || use_flagging || use_flagging_cat || use_cont_sub || use_noise || use_weights || use_noise_scaling || use_ripple_filter))  // ALERT: Add conditions here as needed.
+	if(write_filtered)  // UPDATE 24/10/2022: Condition changed to always write filtered cube if requested!
 	{
 		status("Writing filtered cube");
 		DataCube_add_history(dataCube, par);
@@ -1370,6 +1370,10 @@ int main(int argc, char **argv)
 	
 	if(use_noise || use_weights || use_noise_scaling)  // ALERT: Add conditions here as needed.
 	{
+		// NOTE: Continuum subtraction and ripple filter will not trigger a reload, but they
+		//       won't get reapplied either should the cube be reloaded. While flagging does
+		//       not trigger a reload either, all flags (including from auto-flagging) will be
+		//       reapplied.
 		status("Reloading data cube for parameterisation");
 		DataCube_load(dataCube, Path_get(path_data_in), region);
 		
