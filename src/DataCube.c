@@ -5517,7 +5517,7 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 		if IS_NAN(rms) rms = 0.0;
 		if(rms <= 0.0)
 		{
-			warning("Cannot generate SNR maps, as no valid local RMS found.\n         This could have been caused by disabling source parametrisation.");
+			warning("Cannot generate SNR map, as no valid local RMS found.\n         This could have been caused by disabling source parametrisation.");
 		}
 		
 		// Get source bounding box
