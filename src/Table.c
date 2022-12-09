@@ -210,7 +210,7 @@ PUBLIC void Table_delete(Table *self)
 
 /// @brief Return the number of table rows
 ///
-/// Public methods for retrieving the number of rows in
+/// Public method for retrieving the number of rows in
 /// the specified Table object.
 ///
 /// @param self  Object self-reference.
@@ -226,7 +226,7 @@ PUBLIC size_t Table_rows(const Table *self)
 
 /// @brief Return the number of table columns
 ///
-/// Public methods for retrieving the number of columns in
+/// Public method for retrieving the number of columns in
 /// the specified Table object.
 ///
 /// @param self  Object self-reference.
