@@ -5292,6 +5292,7 @@ PUBLIC DataCube *DataCube_create_pv(const DataCube *self, const double x0, const
 {
 	// Sanity checks
 	check_null(self);
+	const long int datatype = DataCube_gethd_int(self, "BITPIX");
 	
 	// Get current date and time
 	char current_time_string[32];
@@ -5305,7 +5306,7 @@ PUBLIC DataCube *DataCube_create_pv(const DataCube *self, const double x0, const
 	const size_t steps = (double)(nx > ny ? nx : ny) / (2.0 * step_size);
 	
 	// Create empty PV diagram
-	DataCube *pv = DataCube_blank(2 * steps + 1, nz, 1, -32, self->verbosity);
+	DataCube *pv = DataCube_blank(2 * steps + 1, nz, 1, datatype, self->verbosity);
 	
 	// Create/copy WCS header entries
 	char value[FITS_HEADER_VALUE_SIZE + 1];
@@ -5380,16 +5381,31 @@ PUBLIC DataCube *DataCube_create_pv(const DataCube *self, const double x0, const
 		// Blank if pixels are beyond axis range
 		if(x1 >= nx || x2 >= nx || y1 >= ny || y2 >= ny || x2 <= x1 || y2 <= y1)
 		{
-			for(size_t z = 0; z < nz; ++z) DataCube_set_data_flt(pv, x, z, 0, NAN);
+			for(size_t z = 0; z < nz; ++z)
+			{
+				if(datatype < 0) DataCube_set_data_flt(pv, x, z, 0, NAN);
+				else DataCube_set_data_int(pv, x, z, 0, 0);
+			}
 			continue;
 		}
 		
+		// Bi-linear interpolation
 		for(size_t z = 0; z < nz; ++z)
 		{
-			// Bi-linear interpolation
-			const double f1 = (x2 - x_new) * DataCube_get_data_flt(self, x1, y1, z) + (x_new - x1) * DataCube_get_data_flt(self, x2, y1, z);
-			const double f2 = (x2 - x_new) * DataCube_get_data_flt(self, x1, y2, z) + (x_new - x1) * DataCube_get_data_flt(self, x2, y2, z);
-			DataCube_set_data_flt(pv, x, z, 0, (y2 - y_new) * f1 + (y_new - y1) * f2);
+			if(datatype < 0)
+			{
+				// Floating-point data
+				const double f1 = (x2 - x_new) * DataCube_get_data_flt(self, x1, y1, z) + (x_new - x1) * DataCube_get_data_flt(self, x2, y1, z);
+				const double f2 = (x2 - x_new) * DataCube_get_data_flt(self, x1, y2, z) + (x_new - x1) * DataCube_get_data_flt(self, x2, y2, z);
+				DataCube_set_data_flt(pv, x, z, 0, (y2 - y_new) * f1 + (y_new - y1) * f2);
+			}
+			else
+			{
+				// Integer data
+				const double f1 = (x2 - x_new) * DataCube_get_data_int(self, x1, y1, z) + (x_new - x1) * DataCube_get_data_int(self, x2, y1, z);
+				const double f2 = (x2 - x_new) * DataCube_get_data_int(self, x1, y2, z) + (x_new - x1) * DataCube_get_data_int(self, x2, y2, z);
+				DataCube_set_data_int(pv, x, z, 0, floor(((y2 - y_new) * f1 + (y_new - y1) * f2) + 0.5));
+			}
 		}
 	}
 	
@@ -5602,6 +5618,10 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 		DataCube *pv = DataCube_create_pv(cubelet, Source_get_par_by_name_flt(src, "x") - x_min, Source_get_par_by_name_flt(src, "y") - y_min, Source_get_par_by_name_flt(src, "kin_pa") * M_PI / 180.0, 1.0, Source_get_identifier(src));
 		DataCube *pv_min = DataCube_create_pv(cubelet, Source_get_par_by_name_flt(src, "x") - x_min, Source_get_par_by_name_flt(src, "y") - y_min, (Source_get_par_by_name_flt(src, "kin_pa") + 90.0) * M_PI / 180.0, 1.0, Source_get_identifier(src));
 		
+		// Create PV masks
+		DataCube *pv_mask = DataCube_create_pv(masklet, Source_get_par_by_name_flt(src, "x") - x_min, Source_get_par_by_name_flt(src, "y") - y_min, Source_get_par_by_name_flt(src, "kin_pa") * M_PI / 180.0, 1.0, Source_get_identifier(src));
+		DataCube *pv_min_mask = DataCube_create_pv(masklet, Source_get_par_by_name_flt(src, "x") - x_min, Source_get_par_by_name_flt(src, "y") - y_min, (Source_get_par_by_name_flt(src, "kin_pa") + 90.0) * M_PI / 180.0, 1.0, Source_get_identifier(src));
+		
 		// Save output products...
 		// ...cubelet
 		String_set(filename, String_get(filename_template));
@@ -5663,6 +5683,7 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 			DataCube_save(snr, String_get(filename), overwrite, DESTROY);
 		}
 		
+		// ...PV diagrams
 		if(pv != NULL)
 		{
 			String_set(filename, String_get(filename_template));
@@ -5679,6 +5700,24 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 			String_append(filename, "_pv_min.fits");
 			DataCube_add_history(pv_min, par);
 			DataCube_save(pv_min, String_get(filename), overwrite, DESTROY);
+		}
+		
+		if(pv_mask != NULL)
+		{
+			String_set(filename, String_get(filename_template));
+			String_append_int(filename, "%ld", src_id);
+			String_append(filename, "_pv_mask.fits");
+			DataCube_add_history(pv_mask, par);
+			DataCube_save(pv_mask, String_get(filename), overwrite, DESTROY);
+		}
+		
+		if(pv_min_mask != NULL)
+		{
+			String_set(filename, String_get(filename_template));
+			String_append_int(filename, "%ld", src_id);
+			String_append(filename, "_pv_min_mask.fits");
+			DataCube_add_history(pv_min_mask, par);
+			DataCube_save(pv_min_mask, String_get(filename), overwrite, DESTROY);
 		}
 		
 		// ...spectrum
@@ -5780,6 +5819,8 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 		DataCube_delete(snr);
 		DataCube_delete(pv);
 		DataCube_delete(pv_min);
+		DataCube_delete(pv_mask);
+		DataCube_delete(pv_min_mask);
 		free(spectrum);
 		free(pixcount);
 	}
