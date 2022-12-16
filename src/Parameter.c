@@ -606,6 +606,7 @@ PUBLIC void Parameter_default(Parameter *self)
 	Parameter_set(self, "output.writeRawMask"      , "false");
 	Parameter_set(self, "output.writeMoments"      , "false");
 	Parameter_set(self, "output.writeCubelets"     , "false");
+	Parameter_set(self, "output.writePV"           , "false");
 	Parameter_set(self, "output.marginCubelets"    , "10");
 	Parameter_set(self, "output.thresholdMom12"    , "0.0");
 	Parameter_set(self, "output.overwrite"         , "true");

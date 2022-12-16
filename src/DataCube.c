@@ -5430,6 +5430,8 @@ PUBLIC DataCube *DataCube_create_pv(const DataCube *self, const double x0, const
 /// @param  overwrite  Replace existing files (`true`) or not (`false`)?
 /// @param  use_wcs    Try to convert channel numbers to WCS?
 /// @param  physical   If `true`, correct flux for beam solid angle.
+/// @param  write_pv   If `true`, also create and write PV diagrams and
+///                    masks for each detection.
 /// @param  margin     Margin in pixels to be added around each
 ///                    source. If 0, sources will be cut out exactly.
 /// @param  threshold  Flux threshold to be used for moment 1 and 2.
@@ -5438,7 +5440,7 @@ PUBLIC DataCube *DataCube_create_pv(const DataCube *self, const double x0, const
 ///                    to the output FITS file history in the header.
 ///                    If `NULL`, then no history will be written.
 
-PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask, const Catalog *cat, const char *basename, const bool overwrite, bool use_wcs, bool physical, const size_t margin, const double threshold, const size_t offset_z, const Parameter *par)
+PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask, const Catalog *cat, const char *basename, const bool overwrite, bool use_wcs, bool physical, const bool write_pv, const size_t margin, const double threshold, const size_t offset_z, const Parameter *par)
 {
 	// Sanity checks
 	check_null(self);
@@ -5607,20 +5609,27 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 		}
 		
 		// Create moment maps etc.
-		DataCube *mom0;
-		DataCube *mom1;
-		DataCube *mom2;
-		DataCube *chan;
-		DataCube *snr;
+		DataCube *mom0 = NULL;
+		DataCube *mom1 = NULL;
+		DataCube *mom2 = NULL;
+		DataCube *chan = NULL;
+		DataCube *snr = NULL;
+		DataCube *pv = NULL;
+		DataCube *pv_mask = NULL;
+		DataCube *pv_min = NULL;
+		DataCube *pv_min_mask = NULL;
 		DataCube_create_moments(cubelet, masklet, &mom0, &mom1, &mom2, &chan, &snr, Source_get_identifier(src), use_wcs, threshold * rms, rms);
 		
-		// Create PV diagram
-		DataCube *pv = DataCube_create_pv(cubelet, Source_get_par_by_name_flt(src, "x") - x_min, Source_get_par_by_name_flt(src, "y") - y_min, Source_get_par_by_name_flt(src, "kin_pa") * M_PI / 180.0, 1.0, Source_get_identifier(src));
-		DataCube *pv_min = DataCube_create_pv(cubelet, Source_get_par_by_name_flt(src, "x") - x_min, Source_get_par_by_name_flt(src, "y") - y_min, (Source_get_par_by_name_flt(src, "kin_pa") + 90.0) * M_PI / 180.0, 1.0, Source_get_identifier(src));
-		
-		// Create PV masks
-		DataCube *pv_mask = DataCube_create_pv(masklet, Source_get_par_by_name_flt(src, "x") - x_min, Source_get_par_by_name_flt(src, "y") - y_min, Source_get_par_by_name_flt(src, "kin_pa") * M_PI / 180.0, 1.0, Source_get_identifier(src));
-		DataCube *pv_min_mask = DataCube_create_pv(masklet, Source_get_par_by_name_flt(src, "x") - x_min, Source_get_par_by_name_flt(src, "y") - y_min, (Source_get_par_by_name_flt(src, "kin_pa") + 90.0) * M_PI / 180.0, 1.0, Source_get_identifier(src));
+		if(write_pv)
+		{
+			// Create PV diagram
+			pv = DataCube_create_pv(cubelet, Source_get_par_by_name_flt(src, "x") - x_min, Source_get_par_by_name_flt(src, "y") - y_min, Source_get_par_by_name_flt(src, "kin_pa") * M_PI / 180.0, 1.0, Source_get_identifier(src));
+			pv_min = DataCube_create_pv(cubelet, Source_get_par_by_name_flt(src, "x") - x_min, Source_get_par_by_name_flt(src, "y") - y_min, (Source_get_par_by_name_flt(src, "kin_pa") + 90.0) * M_PI / 180.0, 1.0, Source_get_identifier(src));
+			
+			// Create PV masks
+			pv_mask = DataCube_create_pv(masklet, Source_get_par_by_name_flt(src, "x") - x_min, Source_get_par_by_name_flt(src, "y") - y_min, Source_get_par_by_name_flt(src, "kin_pa") * M_PI / 180.0, 1.0, Source_get_identifier(src));
+			pv_min_mask = DataCube_create_pv(masklet, Source_get_par_by_name_flt(src, "x") - x_min, Source_get_par_by_name_flt(src, "y") - y_min, (Source_get_par_by_name_flt(src, "kin_pa") + 90.0) * M_PI / 180.0, 1.0, Source_get_identifier(src));
+		}
 		
 		// Save output products...
 		// ...cubelet
@@ -5684,7 +5693,7 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 		}
 		
 		// ...PV diagrams
-		if(pv != NULL)
+		if(write_pv && pv != NULL)
 		{
 			String_set(filename, String_get(filename_template));
 			String_append_int(filename, "%ld", src_id);
@@ -5693,7 +5702,7 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 			DataCube_save(pv, String_get(filename), overwrite, DESTROY);
 		}
 		
-		if(pv_min != NULL)
+		if(write_pv && pv_min != NULL)
 		{
 			String_set(filename, String_get(filename_template));
 			String_append_int(filename, "%ld", src_id);
@@ -5702,7 +5711,7 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 			DataCube_save(pv_min, String_get(filename), overwrite, DESTROY);
 		}
 		
-		if(pv_mask != NULL)
+		if(write_pv && pv_mask != NULL)
 		{
 			String_set(filename, String_get(filename_template));
 			String_append_int(filename, "%ld", src_id);
@@ -5711,7 +5720,7 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 			DataCube_save(pv_mask, String_get(filename), overwrite, DESTROY);
 		}
 		
-		if(pv_min_mask != NULL)
+		if(write_pv && pv_min_mask != NULL)
 		{
 			String_set(filename, String_get(filename_template));
 			String_append_int(filename, "%ld", src_id);

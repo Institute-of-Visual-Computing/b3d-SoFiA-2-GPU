@@ -1441,6 +1441,7 @@ int main(int argc, char **argv)
 			overwrite,
 			use_wcs,
 			use_physical,
+			Parameter_get_bool(par, "output.writePV"),
 			Parameter_get_int(par, "output.marginCubelets"),
 			thresh_mom,
 			(use_region && use_pos_offset) ? Array_siz_get(region, 4) : 0,
