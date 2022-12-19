@@ -43,6 +43,9 @@
 #include <stdint.h>
 #include <limits.h>
 
+// NOTE: The following is POSIX, but needed to remove files
+#include <unistd.h>
+
 #ifdef _OPENMP
 	#include <omp.h>
 #endif
@@ -5521,6 +5524,85 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 		else String_set(unit_flux, "Jy");
 	}
 	
+	// Delete any existing output files in cubelet directory
+	if(overwrite)
+	{
+		int status = 0;
+		size_t counter = 1;
+		
+		for(status = 0, counter = 1; status == 0; ++counter)
+		{
+			String_make_filename(filename, String_get(filename_template), counter, "_cube.fits");
+			status = unlink(String_get(filename));
+		}
+		
+		for(status = 0, counter = 1; status == 0; ++counter)
+		{
+			String_make_filename(filename, String_get(filename_template), counter, "_mask.fits");
+			status = unlink(String_get(filename));
+		}
+		
+		for(status = 0, counter = 1; status == 0; ++counter)
+		{
+			String_make_filename(filename, String_get(filename_template), counter, "_mom0.fits");
+			status = unlink(String_get(filename));
+		}
+		
+		for(status = 0, counter = 1; status == 0; ++counter)
+		{
+			String_make_filename(filename, String_get(filename_template), counter, "_mom1.fits");
+			status = unlink(String_get(filename));
+		}
+		
+		for(status = 0, counter = 1; status == 0; ++counter)
+		{
+			String_make_filename(filename, String_get(filename_template), counter, "_mom2.fits");
+			status = unlink(String_get(filename));
+		}
+		
+		for(status = 0, counter = 1; status == 0; ++counter)
+		{
+			String_make_filename(filename, String_get(filename_template), counter, "_chan.fits");
+			status = unlink(String_get(filename));
+		}
+		
+		for(status = 0, counter = 1; status == 0; ++counter)
+		{
+			String_make_filename(filename, String_get(filename_template), counter, "_snr.fits");
+			status = unlink(String_get(filename));
+		}
+		
+		for(status = 0, counter = 1; status == 0; ++counter)
+		{
+			String_make_filename(filename, String_get(filename_template), counter, "_spec.txt");
+			status = unlink(String_get(filename));
+		}
+		
+		for(status = 0, counter = 1; status == 0; ++counter)
+		{
+			String_make_filename(filename, String_get(filename_template), counter, "_pv.fits");
+			status = unlink(String_get(filename));
+		}
+		
+		for(status = 0, counter = 1; status == 0; ++counter)
+		{
+			String_make_filename(filename, String_get(filename_template), counter, "_pv_min.fits");
+			status = unlink(String_get(filename));
+		}
+		
+		for(status = 0, counter = 1; status == 0; ++counter)
+		{
+			String_make_filename(filename, String_get(filename_template), counter, "_pv_mask.fits");
+			status = unlink(String_get(filename));
+		}
+		
+		for(status = 0, counter = 1; status == 0; ++counter)
+		{
+			String_make_filename(filename, String_get(filename_template), counter, "_pv_min_mask.fits");
+			status = unlink(String_get(filename));
+		}
+	}
+	
 	// Loop over all sources in the catalogue
 	for(size_t i = 0; i < Catalog_get_size(cat); ++i)
 	{
@@ -5633,61 +5715,47 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 		
 		// Save output products...
 		// ...cubelet
-		String_set(filename, String_get(filename_template));
-		String_append_int(filename, "%ld", src_id);
-		String_append(filename, "_cube.fits");
+		String_make_filename(filename, String_get(filename_template), src_id, "_cube.fits");
 		DataCube_add_history(cubelet, par);
 		DataCube_save(cubelet, String_get(filename), overwrite, DESTROY);
 		
 		// ...masklet
-		String_set(filename, String_get(filename_template));
-		String_append_int(filename, "%ld", src_id);
-		String_append(filename, "_mask.fits");
+		String_make_filename(filename, String_get(filename_template), src_id, "_mask.fits");
 		DataCube_add_history(masklet, par);
 		DataCube_save(masklet, String_get(filename), overwrite, DESTROY);
 		
 		// ...moment maps
 		if(mom0 != NULL)
 		{
-			String_set(filename, String_get(filename_template));
-			String_append_int(filename, "%ld", src_id);
-			String_append(filename, "_mom0.fits");
+			String_make_filename(filename, String_get(filename_template), src_id, "_mom0.fits");
 			DataCube_add_history(mom0, par);
 			DataCube_save(mom0, String_get(filename), overwrite, DESTROY);
 		}
 		
 		if(mom1 != NULL)
 		{
-			String_set(filename, String_get(filename_template));
-			String_append_int(filename, "%ld", src_id);
-			String_append(filename, "_mom1.fits");
+			String_make_filename(filename, String_get(filename_template), src_id, "_mom1.fits");
 			DataCube_add_history(mom1, par);
 			DataCube_save(mom1, String_get(filename), overwrite, DESTROY);
 		}
 		
 		if(mom2 != NULL)
 		{
-			String_set(filename, String_get(filename_template));
-			String_append_int(filename, "%ld", src_id);
-			String_append(filename, "_mom2.fits");
+			String_make_filename(filename, String_get(filename_template), src_id, "_mom2.fits");
 			DataCube_add_history(mom2, par);
 			DataCube_save(mom2, String_get(filename), overwrite, DESTROY);
 		}
 		
 		if(chan != NULL)
 		{
-			String_set(filename, String_get(filename_template));
-			String_append_int(filename, "%ld", src_id);
-			String_append(filename, "_chan.fits");
+			String_make_filename(filename, String_get(filename_template), src_id, "_chan.fits");
 			DataCube_add_history(chan, par);
 			DataCube_save(chan, String_get(filename), overwrite, DESTROY);
 		}
 		
 		if(snr != NULL)
 		{
-			String_set(filename, String_get(filename_template));
-			String_append_int(filename, "%ld", src_id);
-			String_append(filename, "_snr.fits");
+			String_make_filename(filename, String_get(filename_template), src_id, "_snr.fits");
 			DataCube_add_history(snr, par);
 			DataCube_save(snr, String_get(filename), overwrite, DESTROY);
 		}
@@ -5695,44 +5763,34 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 		// ...PV diagrams
 		if(write_pv && pv != NULL)
 		{
-			String_set(filename, String_get(filename_template));
-			String_append_int(filename, "%ld", src_id);
-			String_append(filename, "_pv.fits");
+			String_make_filename(filename, String_get(filename_template), src_id, "_pv.fits");
 			DataCube_add_history(pv, par);
 			DataCube_save(pv, String_get(filename), overwrite, DESTROY);
 		}
 		
 		if(write_pv && pv_min != NULL)
 		{
-			String_set(filename, String_get(filename_template));
-			String_append_int(filename, "%ld", src_id);
-			String_append(filename, "_pv_min.fits");
+			String_make_filename(filename, String_get(filename_template), src_id, "_pv_min.fits");
 			DataCube_add_history(pv_min, par);
 			DataCube_save(pv_min, String_get(filename), overwrite, DESTROY);
 		}
 		
 		if(write_pv && pv_mask != NULL)
 		{
-			String_set(filename, String_get(filename_template));
-			String_append_int(filename, "%ld", src_id);
-			String_append(filename, "_pv_mask.fits");
+			String_make_filename(filename, String_get(filename_template), src_id, "_pv_mask.fits");
 			DataCube_add_history(pv_mask, par);
 			DataCube_save(pv_mask, String_get(filename), overwrite, DESTROY);
 		}
 		
 		if(write_pv && pv_min_mask != NULL)
 		{
-			String_set(filename, String_get(filename_template));
-			String_append_int(filename, "%ld", src_id);
-			String_append(filename, "_pv_min_mask.fits");
+			String_make_filename(filename, String_get(filename_template), src_id, "_pv_min_mask.fits");
 			DataCube_add_history(pv_min_mask, par);
 			DataCube_save(pv_min_mask, String_get(filename), overwrite, DESTROY);
 		}
 		
 		// ...spectrum
-		String_set(filename, String_get(filename_template));
-		String_append_int(filename, "%ld", src_id);
-		String_append(filename, "_spec.txt");
+		String_make_filename(filename, String_get(filename_template), src_id, "_spec.txt");
 		message("Creating text file: %s", strrchr(String_get(filename), '/') == NULL ? String_get(filename) : strrchr(String_get(filename), '/') + 1);
 		
 		// Get current date and time

@@ -204,7 +204,7 @@ PRIVATE void WCS_setup(WCS *self, const char *header, const int n_keys, const in
 	}
 	else
 	{
-		message("WCS setup successful.\n");
+		//message("WCS setup successful.\n");
 		self->valid = true;
 	}
 	

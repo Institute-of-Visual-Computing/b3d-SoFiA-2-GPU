@@ -613,3 +613,35 @@ PUBLIC String *String_to_upper(String *self)
 	
 	return self;
 }
+
+
+
+/// @brief Create filename composed of prefix + number + suffix
+///
+/// Public method for setting the string referred to by `self` to
+/// a value of `postfix` followed by an integer number (`counter`)
+/// followed by `suffix`. This can be used to generate numbered
+/// file names. A pointer to `self` after conversion will be returned
+/// to allow chaining of methods.
+///
+/// @param self     Object self-reference.
+/// @param prefix   C string containing the desired prefix.
+/// @param counter  Unsigned integer number.
+/// @param suffix   C string containing the desired suffix.
+///
+/// @return Pointer to `self` after conversion.
+
+PUBLIC String *String_make_filename(String *self, const char *prefix, const size_t counter, const char *suffix)
+{
+	// Sanity checks
+	check_null(self);
+	check_null(prefix);
+	check_null(suffix);
+	
+	// Generate compound string
+	String_set(self, prefix);
+	String_append_int(self, "%ld", counter);
+	String_append(self, suffix);
+	
+	return self;
+}
