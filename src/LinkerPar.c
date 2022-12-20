@@ -219,11 +219,11 @@ PUBLIC void LinkerPar_push(LinkerPar *self, const size_t label, const size_t x, 
 	self->f_sum[self->size - 1] = flux;
 	self->rel  [self->size - 1] = 0.0;  // NOTE: Must be 0 (default for neg. sources), as only pos. sources will be updated later!
 	self->flags[self->size - 1] = flag;
-	self->fill[self->size - 1]  = 1;
-	self->m1[self->size - 1]    = flux;
-	self->m2[self->size - 1]    = 0.0;
-	self->m3[self->size - 1]    = 0.0;
-	self->m4[self->size - 1]    = 0.0;
+	self->fill [self->size - 1] = 1;
+	self->m1   [self->size - 1] = flux;
+	self->m2   [self->size - 1] = 0.0;
+	self->m3   [self->size - 1] = 0.0;
+	self->m4   [self->size - 1] = 0.0;
 	
 	return;
 }
