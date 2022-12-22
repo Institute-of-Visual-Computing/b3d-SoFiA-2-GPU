@@ -45,7 +45,7 @@
 
 #define CATALOG_COLUMN_WIDTH 14  ///< Defines the width of each column in the plain-text SoFiA source catalogue.
 
-typedef enum {CATALOG_FORMAT_ASCII, CATALOG_FORMAT_XML, CATALOG_FORMAT_SQL} file_format;
+typedef enum {CATALOG_FORMAT_ASCII, CATALOG_FORMAT_XML, CATALOG_FORMAT_SQL, CATALOG_FORMAT_KARMA} file_format;
 
 
 // ----------------------------------------------------------------- //

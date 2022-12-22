@@ -241,6 +241,7 @@ int main(int argc, char **argv)
 	const bool write_ascii       = Parameter_get_bool(par, "output.writeCatASCII");
 	const bool write_xml         = Parameter_get_bool(par, "output.writeCatXML");
 	const bool write_sql         = Parameter_get_bool(par, "output.writeCatSQL");
+	const bool write_karma       = Parameter_get_bool(par, "output.writeKarma");
 	const bool write_noise       = Parameter_get_bool(par, "output.writeNoise");
 	const bool write_filtered    = Parameter_get_bool(par, "output.writeFiltered");
 	const bool write_mask        = Parameter_get_bool(par, "output.writeMask");
@@ -360,6 +361,7 @@ int main(int argc, char **argv)
 	Path *path_cat_ascii = Path_new();
 	Path *path_cat_xml   = Path_new();
 	Path *path_cat_sql   = Path_new();
+	Path *path_cat_karma = Path_new();
 	Path *path_noise_out = Path_new();
 	Path *path_filtered  = Path_new();
 	Path *path_mask_out  = Path_new();
@@ -380,6 +382,7 @@ int main(int argc, char **argv)
 	Path_set_dir(path_cat_ascii, String_get(output_dir_name));
 	Path_set_dir(path_cat_xml,   String_get(output_dir_name));
 	Path_set_dir(path_cat_sql,   String_get(output_dir_name));
+	Path_set_dir(path_cat_karma, String_get(output_dir_name));
 	Path_set_dir(path_noise_out, String_get(output_dir_name));
 	Path_set_dir(path_filtered,  String_get(output_dir_name));
 	Path_set_dir(path_mask_out,  String_get(output_dir_name));
@@ -400,6 +403,7 @@ int main(int argc, char **argv)
 	Path_set_file_from_template(path_cat_ascii,  String_get(output_file_name), "_cat",         ".txt");
 	Path_set_file_from_template(path_cat_xml,    String_get(output_file_name), "_cat",         ".xml");
 	Path_set_file_from_template(path_cat_sql,    String_get(output_file_name), "_cat",         ".sql");
+	Path_set_file_from_template(path_cat_karma,  String_get(output_file_name), "_cat",         ".ann");
 	Path_set_file_from_template(path_noise_out,  String_get(output_file_name), "_noise",       use_local_scaling ? ".fits" : ".txt");
 	Path_set_file_from_template(path_filtered,   String_get(output_file_name), "_filtered",    ".fits");
 	Path_set_file_from_template(path_mask_out,   String_get(output_file_name), "_mask",        ".fits");
@@ -489,6 +493,11 @@ int main(int argc, char **argv)
 			ensure(!Path_file_is_readable(path_cat_sql), ERR_FILE_ACCESS,
 				"SQL catalogue file already exists. Please delete the file\n"
 				"       or set \'output.overwrite = true\'.");
+		}
+		if(write_karma) {
+			ensure(!Path_file_is_readable(path_cat_karma), ERR_FILE_ACCESS,
+				   "Karma annotation file already exists. Please delete the\n"
+				   "       file or set \'output.overwrite = true\'.");
 		}
 		if(use_noise_scaling && write_noise) {
 			ensure(!Path_file_is_readable(path_noise_out), ERR_FILE_ACCESS,
@@ -1574,6 +1583,12 @@ int main(int argc, char **argv)
 			Catalog_save(catalog, Path_get(path_cat_sql), CATALOG_FORMAT_SQL, overwrite, NULL);
 		}
 		
+		if(write_karma)
+		{
+			message("Writing Karma file:   %s", Path_get_file(path_cat_karma));
+			Catalog_save(catalog, Path_get(path_cat_karma), CATALOG_FORMAT_KARMA, overwrite, NULL);
+		}
+		
 		// Print time
 		timestamp(start_time, start_clock);
 	}
@@ -1609,6 +1624,7 @@ int main(int argc, char **argv)
 	Path_delete(path_cat_ascii);
 	Path_delete(path_cat_xml);
 	Path_delete(path_cat_sql);
+	Path_delete(path_cat_karma);
 	Path_delete(path_mask_out);
 	Path_delete(path_mask_2d);
 	Path_delete(path_mask_raw);

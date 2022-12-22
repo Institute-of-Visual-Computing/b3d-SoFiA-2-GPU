@@ -261,14 +261,15 @@ PUBLIC size_t Catalog_get_size(const Catalog *self)
 /// name in the specified file format. The file name will be relative to
 /// the process execution directory unless the full path to the output
 /// directory is specified. Available formats are plain text ASCII,
-/// VOTable XML format and SQL format.
+/// VOTable XML format, SQL format and Karma annotation file.
 ///
 /// @param self       Object self-reference.
 /// @param filename   Full path to the output file.
 /// @param format     Output format; can be `CATALOG_FORMAT_ASCII` for
 ///                   plain text ASCII files, `CATALOG_FORMAT_XML` for
-///                   VOTable format or `CATALOG_FORMAT_SQL` for SQL
-///                   table format.
+///                   VOTable format, `CATALOG_FORMAT_SQL` for SQL
+///                   table format or `CATALOG_FORMAT_KARMA` for Karma
+///                   annotation files.
 /// @param overwrite  Overwrite existing file (`true`) or not (`false`)?
 /// @param par        SoFiA parameter settings for inclusion in VOTable
 ///                   metadata. Set to NULL if not required.
@@ -440,6 +441,41 @@ PUBLIC void Catalog_save(const Catalog *self, const char *filename, const file_f
 			
 			if(i + 1 < self->size) fprintf(fp, "),\n");
 			else fprintf(fp, ");\n");
+		}
+	}
+	else if(format == CATALOG_FORMAT_KARMA)
+	{
+		fprintf(fp, "# KARMA annotation file\n# Creator: %s (%s)\n# Time:    %s\n#\n", SOFIA_VERSION_FULL, SOFIA_CREATION_DATE, current_time_string);
+		fprintf(fp, "COORD W\n");
+		fprintf(fp, "PA STANDARD\n");
+		fprintf(fp, "COLOR GREEN\n\n");
+		
+		for(size_t i = 0; i < self->size; ++i)
+		{
+			// Try to find sky coordinates
+			Source *src = self->sources[i];
+			double lon = Source_get_par_by_name_flt(src, "ra");
+			double lat = Source_get_par_by_name_flt(src, "dec");
+			
+			if(IS_NAN(lon) || IS_NAN(lat))
+			{
+				lon = Source_get_par_by_name_flt(src, "l");
+				lat = Source_get_par_by_name_flt(src, "b");
+			}
+			
+			if(IS_NAN(lon) || IS_NAN(lat))
+			{
+				lon = Source_get_par_by_name_flt(src, "lon");
+				lat = Source_get_par_by_name_flt(src, "lat");
+			}
+			
+			if(IS_NAN(lon) || IS_NAN(lat))
+			{
+				warning("Failed to create Karma annotation file.\n         No sky coordinates found in catalogue.");
+				break;
+			}
+			
+			fprintf(fp, "TEXT W %e %e %zu\n", lon, lat, i + 1);
 		}
 	}
 	else
