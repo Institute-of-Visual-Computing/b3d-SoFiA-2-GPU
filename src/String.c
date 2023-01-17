@@ -645,3 +645,26 @@ PUBLIC String *String_make_filename(String *self, const char *prefix, const size
 	
 	return self;
 }
+
+
+
+/// @brief Replace all occurrences of specific character
+///
+/// Public method for replacing all occurrences of the character `needle`
+/// in the string referred to by `self` with the character `replacement`.
+/// A pointer to `self` after conversion will be returned to allow chaining
+/// of methods.
+///
+/// @param self         Object self-reference.
+/// @param needle       Character to be replaced.
+/// @param replacement  Character to replace `needle` with.
+///
+/// @return Pointer to `self` after replacement.
+
+PUBLIC String *String_replace_char(String *self, const char needle, const char replacement)
+{
+	check_null(self);
+	for(char *ptr = self->string; *ptr; ++ptr)
+		if(*ptr == needle) *ptr = replacement;
+	return self;
+}

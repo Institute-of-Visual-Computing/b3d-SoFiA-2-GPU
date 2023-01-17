@@ -4815,8 +4815,16 @@ PRIVATE void DataCube_get_wcs_info(const DataCube *self, String **unit_flux_dens
 	}
 	else String_trim(*unit_flux_dens);
 	
-	// Fix commonly encountered misspellings
-	if(String_compare(*unit_flux_dens, "JY/BEAM") || String_compare(*unit_flux_dens, "Jy/Beam")) String_set(*unit_flux_dens, "Jy/beam");
+	// Replace all spaces with multiplication sign
+	String_replace_char(*unit_flux_dens, ' ', '*');
+	
+	// Fix commonly encountered misspellings and oddities
+	if(
+		String_compare(*unit_flux_dens, "JY/BEAM") ||
+		String_compare(*unit_flux_dens, "Jy/Beam") ||
+		String_compare(*unit_flux_dens, "Jy*beam-1") ||
+		String_compare(*unit_flux_dens, "beam-1*Jy")
+	) String_set(*unit_flux_dens, "Jy/beam");
 	
 	// Make flux unit the same as flux density unit (might get updated later)
 	*unit_flux = String_copy(*unit_flux_dens);
@@ -5084,8 +5092,16 @@ PUBLIC void DataCube_create_moments(const DataCube *self, const DataCube *mask, 
 	String *unit_flux_dens = Header_get_string(self->header, "BUNIT");
 	String_trim(unit_flux_dens);
 	
-	// Fix commonly encountered misspellings
-	if(String_compare(unit_flux_dens, "JY/BEAM") || String_compare(unit_flux_dens, "Jy/Beam")) String_set(unit_flux_dens, "Jy/beam");
+	// Replace all spaces with multiplication sign
+	String_replace_char(unit_flux_dens, ' ', '*');
+	
+	// Fix commonly encountered misspellings and oddities
+	if(
+		String_compare(unit_flux_dens, "JY/BEAM") ||
+		String_compare(unit_flux_dens, "Jy/Beam") ||
+		String_compare(unit_flux_dens, "Jy*beam-1") ||
+		String_compare(unit_flux_dens, "beam-1*Jy")
+	) String_set(unit_flux_dens, "Jy/beam");
 	
 	// Multiply flux unit by spectral unit
 	if(use_wcs)
@@ -5469,8 +5485,16 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 	}
 	else String_trim(unit_flux_dens);
 	
-	// Fix commonly encountered misspellings
-	if(String_compare(unit_flux_dens, "JY/BEAM") || String_compare(unit_flux_dens, "Jy/Beam")) String_set(unit_flux_dens, "Jy/beam");
+	// Replace all spaces with multiplication sign
+	String_replace_char(unit_flux_dens, ' ', '*');
+	
+	// Fix commonly encountered misspellings and oddities
+	if(
+		String_compare(unit_flux_dens, "JY/BEAM") ||
+		String_compare(unit_flux_dens, "Jy/Beam") ||
+		String_compare(unit_flux_dens, "Jy*beam-1") ||
+		String_compare(unit_flux_dens, "beam-1*Jy")
+	) String_set(unit_flux_dens, "Jy/beam");
 	
 	// Make flux unit the same as flux density for now (may get updated later)
 	String *unit_flux = String_copy(unit_flux_dens);
@@ -5521,7 +5545,7 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 		// Get beam area
 		beam_area = DataCube_get_beam_area(self);
 		if(IS_NAN(beam_area)) beam_area = 1.0;
-		else String_set(unit_flux, "Jy");
+		else String_set(unit_flux, "Jy");  // WARNING: Implicitly assuming 'Jy' if physical parameters requested!
 	}
 	
 	// Define file suffixes

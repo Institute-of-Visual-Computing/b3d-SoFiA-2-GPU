@@ -79,6 +79,8 @@ PUBLIC String     *String_to_upper      (String *self);
 PUBLIC String     *String_clear         (String *self);
 PUBLIC String     *String_trim          (String *self);
 
+PUBLIC String     *String_replace_char  (String *self, const char needle, const char replacement);
+
 PUBLIC String     *String_make_filename (String *self, const char *prefix, const size_t counter, const char *suffix);
 
 #endif
