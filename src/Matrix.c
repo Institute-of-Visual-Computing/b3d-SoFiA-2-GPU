@@ -279,8 +279,7 @@ PUBLIC void Matrix_set_value(Matrix *self, const size_t row, const size_t col, c
 /// @brief Set matrix element to specified value (no sanity checks)
 ///
 /// Public method for setting the element at position (`row`, `col`)
-/// to the specified value. If `row` or `col` are out of range, the
-/// process will be terminated. Identical to Matrix_set_value(), but
+/// to the specified value. Identical to Matrix_set_value(), but
 /// without sanity checks for better performance.
 ///
 /// @param self   Object self-reference.
@@ -324,9 +323,8 @@ PUBLIC double Matrix_get_value(const Matrix *self, const size_t row, const size_
 /// @brief Get matrix element at specified position (no sanity checks)
 ///
 /// Public method for retrieving the value of the matrix at the
-/// position specified by `row` and `col`. If `row` or `col`
-/// are out of range, the process will be terminated. Identical
-/// to Matrix_get_value(), but without sanity checks for better
+/// position specified by `row` and `col`. Identical to
+/// Matrix_get_value(), but without sanity checks for better
 /// performance.
 ///
 /// @param self  Object self-reference.
@@ -563,7 +561,7 @@ PUBLIC double Matrix_vMv_nocheck(const Matrix *self, const Matrix *vector)
 ///
 /// Public method for transposing the specified matrix. The transposed
 /// matrix will be returned. The user will be responsible for calling
-///  the destructor on the transposed matrix once it is no longer needed.
+/// the destructor on the transposed matrix once it is no longer needed.
 ///
 /// @param self  Object self-reference.
 ///
