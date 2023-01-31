@@ -5558,11 +5558,11 @@ PUBLIC void DataCube_create_cubelets(const DataCube *self, const DataCube *mask,
 		for(int n = 0; n < n_types; ++n)
 		{
 			int status = 0;
-			size_t counter = 1;
+			size_t counter = 0;
 			
-			for(status = 0, counter = 1; status == 0; ++counter)
+			while(status == 0)
 			{
-				String_make_filename(filename, String_get(filename_template), counter, suffixes[n]);
+				String_make_filename(filename, String_get(filename_template), ++counter, suffixes[n]);
 				status = unlink(String_get(filename));
 			}
 		}
