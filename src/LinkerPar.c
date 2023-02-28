@@ -1457,21 +1457,26 @@ PUBLIC void LinkerPar_rel_plots(const LinkerPar *self, const Array_siz *rel_par_
 			// Plot fmin and npix lines if possible
 			if(Array_siz_get(rel_par_space, p1) == LINKERPAR_SUM && Array_siz_get(rel_par_space, p2) == LINKERPAR_MEAN)
 			{
+				double plot_x = 0.0;
+				double plot_y = 0.0;
 				fprintf(fp, "gsave\n");
 				
 				// fmin
-				double plot_x = plot_offset_x;
-				double plot_y = (2.0 * log10(fmin) - data_min_x - data_min_y) * plot_size_y / (data_max_y - data_min_y) + plot_offset_y;
-				
-				fprintf(fp, "%s rgb\n", colour_fmin);
-				fprintf(fp, "[3 3] 0 setdash\n");
-				fprintf(fp, "np %zu %zu m %zu %zu l %zu %zu l %zu %zu l cp clip\n", plot_offset_x, plot_offset_y, plot_offset_x + plot_size_x, plot_offset_y, plot_offset_x + plot_size_x, plot_offset_y + plot_size_y, plot_offset_x, plot_offset_y + plot_size_y);
-				fprintf(fp, "%.2f %.2f m\n", plot_x, plot_y);
-				
-				plot_x = plot_offset_x + plot_size_x;
-				plot_y = (2.0 * log10(fmin) - data_max_x - data_min_y) * plot_size_y / (data_max_y - data_min_y) + plot_offset_y;
-				
-				fprintf(fp, "%.2f %.2f l s\n", plot_x, plot_y);
+				if(fmin > 0.0)
+				{
+					plot_x = plot_offset_x;
+					plot_y = (2.0 * log10(fmin) - data_min_x - data_min_y) * plot_size_y / (data_max_y - data_min_y) + plot_offset_y;
+					
+					fprintf(fp, "%s rgb\n", colour_fmin);
+					fprintf(fp, "[3 3] 0 setdash\n");
+					fprintf(fp, "np %zu %zu m %zu %zu l %zu %zu l %zu %zu l cp clip\n", plot_offset_x, plot_offset_y, plot_offset_x + plot_size_x, plot_offset_y, plot_offset_x + plot_size_x, plot_offset_y + plot_size_y, plot_offset_x, plot_offset_y + plot_size_y);
+					fprintf(fp, "%.2f %.2f m\n", plot_x, plot_y);
+					
+					plot_x = plot_offset_x + plot_size_x;
+					plot_y = (2.0 * log10(fmin) - data_max_x - data_min_y) * plot_size_y / (data_max_y - data_min_y) + plot_offset_y;
+					
+					fprintf(fp, "%.2f %.2f l s\n", plot_x, plot_y);
+				}
 				
 				fprintf(fp, "np %zu %.zu m\n", plot_offset_x + 14, plot_offset_y + plot_size_y - 20);
 				fprintf(fp, "%s rgb\n", colour_fmin);
