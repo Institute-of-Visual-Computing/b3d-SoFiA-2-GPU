@@ -897,6 +897,21 @@ PUBLIC void Header_copy_wcs(const Header *source, Header *target)
 		Header_get_str(source, "SPECSYS", value);
 		Header_set_str(target, "SPECSYS", value);
 	}
+	if(Header_check(source, "SPECSYS1"))
+	{
+		Header_get_str(source, "SPECSYS1", value);
+		Header_set_str(target, "SPECSYS1", value);
+	}
+	if(Header_check(source, "SPECSYS2"))
+	{
+		Header_get_str(source, "SPECSYS2", value);
+		Header_set_str(target, "SPECSYS2", value);
+	}
+	if(Header_check(source, "SPECSYS3"))
+	{
+		Header_get_str(source, "SPECSYS3", value);
+		Header_set_str(target, "SPECSYS3", value);
+	}
 	
 	// Equinox and coordinate system
 	if(Header_check(source, "EQUINOX"))  Header_set_flt(target, "EQUINOX",  Header_get_flt(source, "EQUINOX"));

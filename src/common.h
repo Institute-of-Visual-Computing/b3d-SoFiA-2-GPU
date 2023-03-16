@@ -44,7 +44,7 @@
 
 #define SOFIA_VERSION "2.5.1"              ///< SoFiA version number.
 #define SOFIA_VERSION_FULL "SoFiA 2.5.1"   ///< Full SoFiA version string.
-#define SOFIA_CREATION_DATE "28-Feb-2023"  ///< Date of current SoFiA version.
+#define SOFIA_CREATION_DATE "16-Mar-2023"  ///< Date of current SoFiA version.
 
 #ifndef M_PI
 #define M_PI 3.141592653589793  ///< Archimedes' constant (pi).
