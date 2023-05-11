@@ -59,6 +59,7 @@
 #include "src/WCS.h"
 #include "src/DataCube.h"
 #include "src/LinkerPar.h"
+#include "src/Gpu.h"
 
 
 

@@ -55,6 +55,7 @@
 #include "Source.h"
 #include "statistics_flt.h"
 #include "statistics_dbl.h"
+#include "Gpu.h"
 
 
 
@@ -1911,6 +1912,15 @@ PUBLIC void DataCube_boxcar_filter(DataCube *self, size_t radius)
 	ensure(self->data_type == -32 || self->data_type == -64, ERR_USER_INPUT, "Cannot run boxcar filter on integer array.");
 	if(radius < 1) return;
 	
+	// Run on GPU
+	if (true)
+	{
+		printf("Starting GPU stuff\n");
+		GPU_DataCube_boxcar_filter(self->data, self->word_size, self->data_size, self->axis_size, radius);
+		printf("Finished GPU stuff\n");
+		return;
+	}
+
 	if(self->data_type == -32)
 	{
 		// Single-precision floating-point type
