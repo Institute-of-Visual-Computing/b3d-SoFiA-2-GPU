@@ -2024,6 +2024,12 @@ PUBLIC void DataCube_gaussian_filter(DataCube *self, const double sigma)
 	optimal_filter_size_dbl(sigma, &filter_radius, &n_iter);
 	const size_t size = self->axis_size[0] * self->axis_size[1] * self->word_size;
 	
+	if (true)
+	{
+		GPU_DataCube_gauss_filter(self->data, self->word_size, self->data_size, self->axis_size, filter_radius, n_iter);
+		return;
+	}
+
 	if(self->data_type == -32)
 	{
 		#pragma omp parallel
