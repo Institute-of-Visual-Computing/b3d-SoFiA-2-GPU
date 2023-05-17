@@ -148,8 +148,8 @@ printf("N-Iter: %lu\n", n_iter);
     }
 
     // Gauss Filter in X Direction
-    dim3 blockSizeX(16,16);
-    dim3 gridSizeX((axis_size[2] + blockSizeX.x - 1) / blockSizeX.x,
+    dim3 blockSizeX(32,32);
+    dim3 gridSizeX((axis_size[2] + blockSizeX.x - 1) / blockSizeX.x ,
                   (axis_size[1] + blockSizeX.y - 1) / blockSizeX.y);
 
     // Error before Kernel Launch?
@@ -159,7 +159,7 @@ printf("N-Iter: %lu\n", n_iter);
         printf("Cuda error before Xkernel launch: %s\n", cudaGetErrorString(err));    
     }
 
-    g_DataCube_gauss_filter_XDir<<<gridSizeX, blockSizeX>>>(d_data, data_box, word_size, axis_size[0], axis_size[1], axis_size[2], radius, n_iter);
+    g_DataCube_gauss_filter_XDir<<<gridSizeX, blockSizeX, axis_size[0] * sizeof(float) + (axis_size[0] + 2 * radius) * sizeof(float)>>>(d_data, data_box, word_size, axis_size[0], axis_size[1], axis_size[2], radius, n_iter);
 
     cudaDeviceSynchronize();
 
@@ -173,7 +173,7 @@ printf("N-Iter: %lu\n", n_iter);
     // Gauss Filter in Y Direction
     dim3 blockSizeY(16,16);
     dim3 gridSizeY((axis_size[2] + blockSizeY.x - 1) / blockSizeY.x,
-                  (axis_size[1] + blockSizeY.y - 1) / blockSizeY.y);
+                  (axis_size[0] + blockSizeY.y - 1) / blockSizeY.y);
 
     // Error before Kernel Launch?
     err = cudaGetLastError();
@@ -181,8 +181,6 @@ printf("N-Iter: %lu\n", n_iter);
     {
         printf("Cuda error before Ykernel launch: %s\n", cudaGetErrorString(err));    
     }
-
-    cudaDeviceSynchronize();
 
     g_DataCube_gauss_filter_YDir<<<gridSizeY, blockSizeY>>>(d_data, data_box, word_size, axis_size[0], axis_size[1], axis_size[2], radius, n_iter);
 
@@ -231,17 +229,109 @@ __global__ void g_DataCube_boxcar_filter(float *data, float *data_box, int word_
 
 __global__ void g_DataCube_gauss_filter_XDir(float *data, float *data_box, int word_size, size_t width, size_t height, size_t depth, size_t radius, size_t n_iter)
 {
-    size_t x = blockIdx.x * blockDim.x + threadIdx.x;
-    size_t y = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t thread_count = blockDim.x * blockDim.y;
+    size_t thread_index = threadIdx.x * blockDim.y + threadIdx.y;
 
-    if (x < depth && y < height)
+    const size_t filter_size = 2 * radius + 1;
+	const float inv_filter_size = 1.0 / filter_size;
+
+    extern __shared__ float s_data[];
+    float *s_data_box = &s_data[width];
+
+    size_t start_index = blockIdx.x * blockDim.x * width * height + blockIdx.y * blockDim.y * width;
+
+    for (int iter = 0; iter < blockDim.x * blockDim.y; iter++)
     {
-        data = data + (y * width + x * width * height);
-        data_box = data_box + y * (width + 2 * radius) 
-                            + x * (width + 2 * radius) * height;
+        if (blockIdx.y * blockDim.y + (iter % blockDim.y) >= height) continue;
 
-        for(size_t i = n_iter; i--;) d_filter_boxcar_1d_flt(data, data_box, width, radius, 1);
+        size_t data_index = start_index + (iter % blockDim.y) * width + (iter / blockDim.y) * width * height;
+
+        if (data_index >= width * height * depth) continue;
+
+        for (size_t i = 0; i < (float)width / thread_count; i++)
+        {
+            size_t j = thread_index + thread_count * i;
+            if (j < width)
+            {
+                s_data[j] = s_data_box[radius + j] = data[data_index + j];
+            }
+        }
+
+         for (int i = radius; i--;) s_data_box[i] = s_data_box[radius + width + i] = 0.0;
+
+        __syncthreads();
+
+        for (size_t k = n_iter; k--;)
+        {
+            for (int i = 0; i < (float)width / thread_count; i++)
+            {
+                int j = thread_index + thread_count * i;
+                if (j < width)
+                {
+                    s_data[j] = 0.0;
+                    for(int f = filter_size; f--;) s_data[j] += s_data_box[j + f];
+                    s_data[j] *= inv_filter_size;
+                }
+            }
+
+            __syncthreads();
+
+            for (int i = 0; i < (float)width / thread_count; i++)
+            {
+                int j = thread_index + thread_count * i;
+                if (j < width)
+                {
+                    s_data_box[radius + j] = s_data[j];
+                }
+            }
+
+            __syncthreads();
+        }
+
+        for (int i = 0; i < width / (float)thread_count; i++)
+        {
+            int j = thread_index + thread_count * i;
+            if (j < width)
+            {
+                data[data_index + j] = s_data[j];
+            }
+        }
+
+        //__syncthreads();
     }
+
+
+
+    // if (x < depth && y < height)
+    // {
+    //     data = data + (y * width + x * width * height);
+    //     data_box = data_box + y * (width + 2 * radius) 
+    //                         + x * (width + 2 * radius) * height;
+
+    //     //for(size_t i = n_iter; i--;) d_filter_boxcar_1d_flt(data, data_box, width, radius, 1);
+
+    //     for (size_t i = n_iter; i--;)
+    //     {
+    //         // Perform data blocking within the thread block
+    //         __shared__ float sharedData[32*32][width];
+    //         size_t blockStart = blockIdx.x * blockDim.x;
+
+    //         // Copy data into shared memory
+    //         sharedData[threadIdx.y][threadIdx.x] = data[blockStart + threadIdx.x];
+
+    //         // Sync threads to ensure data is available in shared memory
+    //         __syncthreads();
+
+    //         // Perform the filter operation on the shared data
+    //         d_filter_boxcar_1d_flt(sharedData[threadIdx.y], data_box, width, radius, 1);
+
+    //         // Sync threads before copying the filtered data back to global memory
+    //         __syncthreads();
+
+    //         // Copy the filtered data back to global memory
+    //         data[blockStart + threadIdx.x] = sharedData[threadIdx.y][threadIdx.x];
+    //     }
+    // }
 }
 
 __global__ void g_DataCube_gauss_filter_YDir(float *data, float *data_box, int word_size, size_t width, size_t height, size_t depth, size_t radius, size_t n_iter)

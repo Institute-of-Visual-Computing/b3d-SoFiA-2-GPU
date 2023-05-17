@@ -3926,7 +3926,7 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 	if(method == NOISE_STAT_STD)      rms = DataCube_stat_std(self, 0.0, cadence, range);
 	else if(method == NOISE_STAT_MAD) rms = MAD_TO_STD * DataCube_stat_mad(self, 0.0, cadence, range);
 	else                              rms = DataCube_stat_gauss(self, cadence, range);
-	
+
 	// Run S+C finder for all smoothing kernels
 	for(size_t i = 0; i < Array_dbl_get_size(kernels_spat); ++i)
 	{
@@ -3942,11 +3942,11 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 				
 				// Set flux of already detected pixels to maskScaleXY * rms
 				if(maskScaleXY >= 0.0) DataCube_set_masked_8(smoothedCube, maskCube, maskScaleXY * rms);
-				
+
 				// Spatial and spectral smoothing
 				if(Array_dbl_get(kernels_spat, i) > 0.0) DataCube_gaussian_filter(smoothedCube, Array_dbl_get(kernels_spat, i) / FWHM_CONST);
 				if(Array_siz_get(kernels_spec, j) > 0)   DataCube_boxcar_filter(smoothedCube, Array_siz_get(kernels_spec, j) / 2);
-				
+
 				// Copy original blanks into smoothed cube again
 				// (these were set to 0 during smoothing)
 				DataCube_copy_blanked(smoothedCube, self);

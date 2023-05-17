@@ -90,7 +90,7 @@ gcc --std=c99 --pedantic -Wall -Wextra -Wshadow -Wno-unknown-pragmas -Wno-unused
 
 
 # Remove object files
-#rm -rf src/*.o
+rm -rf src/*.o
 
 # Print instructions
 echo "_______________________________________________________________________"
