@@ -1890,6 +1890,28 @@ PUBLIC DataCube *DataCube_scale_noise_local(DataCube *self, const noise_stat sta
 	return noiseCube;
 }
 
+PUBLIC void DataCube_GPU_filter(DataCube *self, const double sigmaGauss, const double radiusBoxcar)
+{
+	// Sanity checks
+	check_null(self);
+	check_null(self->data);
+	ensure(self->data_type == -32 || self->data_type == -64, ERR_USER_INPUT, "Cannot run boxcar filter on integer array.");
+	
+	// Set up parameters required for boxcar filter
+	// NOTE: We don't need to extract a copy of each image plane, as
+	///     x-y planes are contiguous in memory.
+	size_t n_iter;
+	size_t filter_radius_gauss;
+	optimal_filter_size_dbl(sigmaGauss, &filter_radius_gauss, &n_iter);
+	const size_t size = self->axis_size[0] * self->axis_size[1] * self->word_size;
+
+	printf("Starting GPU Stuff\n");
+
+	GPU_DataCube_filter(self->data, self->word_size, self->data_size, self->axis_size, filter_radius_gauss, n_iter, radiusBoxcar);
+
+	printf("Finished GPU Stuff\n");
+}
+
 
 
 /// @brief Apply boxcar filter to spectral axis
@@ -3937,15 +3959,20 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 			// Check if any smoothing requested
 			if(Array_dbl_get(kernels_spat, i) || Array_siz_get(kernels_spec, j))
 			{
+				// Print time
+				timestamp(start_time, start_clock);
 				// Smoothing required; create a copy of the original cube
 				DataCube *smoothedCube = DataCube_copy(self);
+				// Print time
+				timestamp(start_time, start_clock);
 				
 				// Set flux of already detected pixels to maskScaleXY * rms
 				if(maskScaleXY >= 0.0) DataCube_set_masked_8(smoothedCube, maskCube, maskScaleXY * rms);
 
 				// Spatial and spectral smoothing
-				if(Array_dbl_get(kernels_spat, i) > 0.0) DataCube_gaussian_filter(smoothedCube, Array_dbl_get(kernels_spat, i) / FWHM_CONST);
-				if(Array_siz_get(kernels_spec, j) > 0)   DataCube_boxcar_filter(smoothedCube, Array_siz_get(kernels_spec, j) / 2);
+				if (true) {DataCube_GPU_filter(smoothedCube, Array_dbl_get(kernels_spat, i) / FWHM_CONST, Array_siz_get(kernels_spec, j) / 2);}
+				else if(Array_dbl_get(kernels_spat, i) > 0.0) DataCube_gaussian_filter(smoothedCube, Array_dbl_get(kernels_spat, i) / FWHM_CONST);
+				else if(Array_siz_get(kernels_spec, j) > 0)   DataCube_boxcar_filter(smoothedCube, Array_siz_get(kernels_spec, j) / 2);
 
 				// Copy original blanks into smoothed cube again
 				// (these were set to 0 during smoothing)
