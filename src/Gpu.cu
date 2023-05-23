@@ -14,67 +14,69 @@ printf("N-Iter: %lu\n", n_iter);
     // check for CUDA capable device
     cudaFree(0);
     int deviceCount;
-    //printf("wordSize: %i dataSize: %lu charSize: %lu\n", word_size, data_size, sizeof(char));
-    //printf("Size per char: %lu, Size per word: %lu, Size per float: %lu\n", sizeof(char), sizeof(char) * word_size, sizeof(double));
+    cudaDeviceProp prop;
     cudaGetDeviceCount(&deviceCount);
     if (deviceCount == 0) {
         printf("No CUDA devices found.\n");
         exit(0);
     }
 
+    cudaGetDeviceProperties(&prop, 0);
+
     // Allocate and copy Datacube data onto GPU
     float *d_data;
-    float *data_box;
+    float *d_data_box;
 
     err = cudaGetLastError();
     printf("%s\n", cudaGetErrorString(err));
 
-    err = cudaMalloc((void**)&d_data, data_size * word_size * sizeof(char));
-    if (err != cudaSuccess)
-    {
-        printf("%s\n", cudaGetErrorString(err));
-        exit(0);
-    }
+    printf("Device Name: %s\n", prop.name);
+    printf("Total Global Memory: %lu bytes\n", (unsigned long)prop.totalGlobalMem);
 
     size_t x_overlap = axis_size[1] * axis_size[2] * 2 * radiusGauss;
     size_t y_overlap = axis_size[0] * axis_size[2] * 2 * radiusGauss;
     size_t z_overlap = axis_size[0] * axis_size[1] * 2 * radiusBoxcar;
 
+    size_t box_size =   (data_size 
+                            + (x_overlap > y_overlap ? (x_overlap > z_overlap ? x_overlap : z_overlap) 
+                            : (y_overlap > z_overlap ? y_overlap : z_overlap))
+                        ) 
+                        * sizeof(float);
+    size_t number_of_chunks = 2;
+    size_t slices_per_chunk = ceil((float)axis_size[2] / number_of_chunks);
 
-    err = cudaMalloc((void**)&data_box, (data_size + 
-                                            (x_overlap > y_overlap ? (x_overlap > z_overlap ? x_overlap : z_overlap) 
-                                            : (y_overlap > z_overlap ? y_overlap : z_overlap))) 
-                                            * sizeof(float));
+    if (prop.totalGlobalMem < 2 * box_size)
+    {
+        number_of_chunks = ((2 * box_size) / prop.totalGlobalMem) + 1;
+        slices_per_chunk /= number_of_chunks;
+        slices_per_chunk++;
+    }
+
+    if (slices_per_chunk < 2 * radiusBoxcar + 1)
+    {
+        printf("Insufficient memory on GPU to load enought slices of the cube to perform the boxcar filter.\n");
+        exit(1);
+    }
+
+    size_t chunk_overlap = (slices_per_chunk * axis_size[1] * 2 * radiusGauss) > y_overlap ? 
+                           (x_overlap > z_overlap ? x_overlap : z_overlap) : 
+                           (y_overlap > z_overlap ? y_overlap : z_overlap);
+
+    err = cudaMalloc((void**)&d_data, (slices_per_chunk + 2 * radiusBoxcar) * axis_size[0] * axis_size[1] * word_size * sizeof(char));
     if (err != cudaSuccess)
     {
         printf("%s\n", cudaGetErrorString(err));
         exit(0);
     }
 
-    // Gauss Filter size in X Direction
-    dim3 blockSizeX(32,32);
-    dim3 gridSizeX((axis_size[2] + blockSizeX.x - 1) / blockSizeX.x ,
-                  (axis_size[1] + blockSizeX.y - 1) / blockSizeX.y);
+    err = cudaMalloc((void**)&d_data_box, (slices_per_chunk * axis_size[0] * axis_size[1] + chunk_overlap) * sizeof(float));
+    if (err != cudaSuccess)
+    {
+        printf("%s\n", cudaGetErrorString(err));
+        exit(0);
+    }
 
-    cudaStream_t stream1, stream2;
-    cudaStreamCreate(&stream1);
-    cudaStreamCreate(&stream2);
-
-    char flag = 'X';
-
-    // for (int i = 0; i < blockSizeX.x; i++)
-    // {
-    //     for (int j = 0; j < blockSizeX.y; j++)
-    //     {
-    //         cudaMemcpy(d_data 
-    //                         + min(i * axis_size[0] * axis_size[1] * gridSizeX.x + (gridSizeX.x - 1) * axis_size[0] * axis_size[1], (axis_size[2]- 1) * axis_size[0] * axis_size[1])
-    //                         + min(j * axis_size[0] * gridSizeX.y + (gridSizeX.y - 1) * axis_size[0], (axis_size[1] - 1) * axis_size[0])
-    //                         + axis_size[0] - 1, 
-    //                         &flag, sizeof(char), cudaMemcpyHostToDevice);
-    //     }
-    // }
-
-    cudaMemcpy(d_data, data, word_size * data_size * sizeof(char), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_data + radiusBoxcar * axis_size[0] * axis_size[1], data, (slices_per_chunk + radiusBoxcar) * axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyHostToDevice);
 
     // Error after mem copy?
     err = cudaGetLastError();
@@ -90,7 +92,12 @@ printf("N-Iter: %lu\n", n_iter);
         printf("Cuda error before Xkernel launch: %s\n", cudaGetErrorString(err));    
     }
 
-    if (radiusGauss) g_DataCube_gauss_filter_XDir<<<gridSizeX, blockSizeX, axis_size[0] * sizeof(float) + (axis_size[0] + 2 * radiusGauss) * sizeof(float)>>>(d_data, data_box, word_size, axis_size[0], axis_size[1], axis_size[2], radiusGauss, n_iter);
+    // Gauss Filter size in X Direction
+    dim3 blockSizeX(ceil((float)32 / number_of_chunks),32);
+    dim3 gridSizeX((slices_per_chunk + blockSizeX.x - 1) / blockSizeX.x ,
+                (axis_size[1] + blockSizeX.y - 1) / blockSizeX.y);
+
+    if (radiusGauss) g_DataCube_gauss_filter_XDir<<<gridSizeX, blockSizeX, axis_size[0] * sizeof(float) + (axis_size[0] + 2 * radiusGauss) * sizeof(float)>>>(d_data + radiusBoxcar * axis_size[0] * axis_size[1], d_data_box, word_size, axis_size[0], axis_size[1], slices_per_chunk, radiusGauss, n_iter);
 
     cudaDeviceSynchronize();
 
@@ -102,9 +109,9 @@ printf("N-Iter: %lu\n", n_iter);
     }
 
     // Gauss Filter in Y Direction
-    dim3 blockSizeY(16,16);
-    dim3 gridSizeY((axis_size[2] + blockSizeY.x - 1) / blockSizeY.x,
-                  (axis_size[0] + blockSizeY.y - 1) / blockSizeY.y);
+    dim3 blockSizeY(ceil((float)16 / number_of_chunks),16);
+    dim3 gridSizeY((slices_per_chunk + blockSizeY.x - 1) / blockSizeY.x,
+                (axis_size[0] + blockSizeY.y - 1) / blockSizeY.y);
 
     // Error before Kernel Launch?
     err = cudaGetLastError();
@@ -113,7 +120,7 @@ printf("N-Iter: %lu\n", n_iter);
         printf("Cuda error before Ykernel launch: %s\n", cudaGetErrorString(err));    
     }
 
-    if (radiusGauss) g_DataCube_gauss_filter_YDir<<<gridSizeY, blockSizeY>>>(d_data, data_box, word_size, axis_size[0], axis_size[1], axis_size[2], radiusGauss, n_iter);
+    if (radiusGauss) g_DataCube_gauss_filter_YDir<<<gridSizeY, blockSizeY>>>(d_data + radiusBoxcar * axis_size[0] * axis_size[1], d_data_box, word_size, axis_size[0], axis_size[1], slices_per_chunk, radiusGauss, n_iter);
 
     cudaDeviceSynchronize();
 
@@ -127,11 +134,11 @@ printf("N-Iter: %lu\n", n_iter);
     // Boxcar Filter in Z Direction
     dim3 blockSizeZ(32,32);
     dim3 gridSizeZ((axis_size[0] + blockSizeZ.x - 1) / blockSizeZ.x,
-                  (axis_size[1] + blockSizeZ.y - 1) / blockSizeZ.y);
+                (axis_size[1] + blockSizeZ.y - 1) / blockSizeZ.y);
 
-    if (radiusBoxcar) g_DataCube_boxcar_filter<<<blockSizeZ, blockSizeZ>>>(d_data, data_box, word_size, axis_size[0], axis_size[1], axis_size[2], radiusBoxcar);
+    if (radiusBoxcar) g_DataCube_boxcar_filter<<<blockSizeZ, blockSizeZ>>>(d_data, d_data_box, word_size, axis_size[0], axis_size[1], slices_per_chunk, radiusBoxcar, 0);
 
-    cudaMemcpy(data, d_data, word_size * data_size * sizeof(char), cudaMemcpyDeviceToHost);
+    cudaMemcpy(data, d_data + radiusBoxcar * axis_size[0] * axis_size[1], slices_per_chunk * axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyDeviceToHost);
     // Error after backkcopy??
     err = cudaGetLastError();
     if (err != cudaSuccess)
@@ -139,165 +146,98 @@ printf("N-Iter: %lu\n", n_iter);
         printf("Cuda error after backcopy: %s\n", cudaGetErrorString(err));
     }
 
-    cudaFree(d_data);
-    cudaFree(data_box);
-
-    // Error after free mem??
-    err = cudaGetLastError();
-    if (err != cudaSuccess)
+    for (int i = 1; i < number_of_chunks - 1; i++)
     {
-        printf("Cuda error after freeing memory: %s\n", cudaGetErrorString(err));    
-    }
-}
+        cudaMemcpy(d_data, data + (i * slices_per_chunk - radiusBoxcar) * axis_size[0] * axis_size[1] * word_size, (slices_per_chunk + 2 * radiusBoxcar) * axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyHostToDevice);
 
-void GPU_DataCube_boxcar_filter(char *data, int word_size, size_t data_size, size_t *axis_size, size_t radius)
-{
-    // Error at start?
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess)
-    {
-        printf("Cuda error at start: %s\n", cudaGetErrorString(err));    
-    }
+        // Error after mem copy?
+        err = cudaGetLastError();
+        if (err != cudaSuccess)
+        {
+            printf("Cuda error at mem Copy to device: %s\n", cudaGetErrorString(err));    
+        }
 
-    // check for CUDA capable device
-    cudaFree(0);
-    int deviceCount;
-    cudaGetDeviceCount(&deviceCount);
-    if (deviceCount == 0) {
-        printf("No CUDA devices found.\n");
-        exit(0);
-    }
+        // Error before Kernel Launch?
+        err = cudaGetLastError();
+        if (err != cudaSuccess)
+        {
+            printf("Cuda error before Xkernel launch: %s\n", cudaGetErrorString(err));    
+        }
 
-    // Allocate and copy Datacube data onto GPU
-    float *d_data;
-    float *data_box;
+            // Gauss Filter size in X Direction
+        dim3 blockSizeX(ceil((float)32 / number_of_chunks),32);
+        dim3 gridSizeX((slices_per_chunk + blockSizeX.x - 1) / blockSizeX.x ,
+                    (axis_size[1] + blockSizeX.y - 1) / blockSizeX.y);
 
-    err = cudaGetLastError();
-    printf("%s\n", cudaGetErrorString(err));
+        if (radiusGauss) g_DataCube_gauss_filter_XDir<<<gridSizeX, blockSizeX, axis_size[0] * sizeof(float) + (axis_size[0] + 2 * radiusGauss) * sizeof(float)>>>(d_data + radiusBoxcar * axis_size[0] * axis_size[1], d_data_box, word_size, axis_size[0], axis_size[1], slices_per_chunk, radiusGauss, n_iter);
 
-    err = cudaMalloc((void**)&d_data, data_size * word_size * sizeof(char));
-    if (err != cudaSuccess)
-    {
-        printf("%s\n", cudaGetErrorString(err));
-        exit(0);
-    }
+        cudaDeviceSynchronize();
 
-    err = cudaMalloc((void**)&data_box, (data_size + axis_size[0] * axis_size[1] * 2 * radius) * sizeof(float));
-    if (err != cudaSuccess)
-    {
-        printf("%s\n", cudaGetErrorString(err));
-        exit(0);
-    }
+        // Error after Kernel Launch?
+        err = cudaGetLastError();
+        if (err != cudaSuccess)
+        {
+            printf("Cuda error after Xkernel launch: %s\n", cudaGetErrorString(err));    
+        }
 
-    cudaMemcpy(d_data, data, word_size * data_size * sizeof(char), cudaMemcpyHostToDevice);
+        // Gauss Filter in Y Direction
+        dim3 blockSizeY(ceil((float)16 / number_of_chunks),16);
+        dim3 gridSizeY((slices_per_chunk + blockSizeY.x - 1) / blockSizeY.x,
+                    (axis_size[0] + blockSizeY.y - 1) / blockSizeY.y);
 
-    // Error after mem copy?
-    err = cudaGetLastError();
-    if (err != cudaSuccess)
-    {
-        printf("Cuda error at mem Copy to device: %s\n", cudaGetErrorString(err));    
-    }
+        // Error before Kernel Launch?
+        err = cudaGetLastError();
+        if (err != cudaSuccess)
+        {
+            printf("Cuda error before Ykernel launch: %s\n", cudaGetErrorString(err));    
+        }
 
-    dim3 blockSize(32,32);
-    dim3 gridSize((axis_size[0] + blockSize.x - 1) / blockSize.x,
-                  (axis_size[1] + blockSize.y - 1) / blockSize.y);
+        if (radiusGauss) g_DataCube_gauss_filter_YDir<<<gridSizeY, blockSizeY>>>(d_data + radiusBoxcar * axis_size[0] * axis_size[1], d_data_box, word_size, axis_size[0], axis_size[1], slices_per_chunk, radiusGauss, n_iter);
 
-    // Error before Kernel Launch?
-    err = cudaGetLastError();
-    if (err != cudaSuccess)
-    {
-        printf("Cuda error before kernel launch: %s\n", cudaGetErrorString(err));    
-    }
+        cudaDeviceSynchronize();
 
-    // Launch CUDA Kernel
-    cudaDeviceSynchronize();
-    g_DataCube_boxcar_filter<<<gridSize, blockSize>>>(d_data, data_box, word_size, axis_size[0], axis_size[1], axis_size[2], radius);
+        // Error after Kernel Launch?
+        err = cudaGetLastError();
+        if (err != cudaSuccess)
+        {
+            printf("Cuda error after Ykernel launch: %s\n", cudaGetErrorString(err));    
+        }
 
-    cudaDeviceSynchronize();
+        // Boxcar Filter in Z Direction
+        dim3 blockSizeZ(32,32);
+        dim3 gridSizeZ((axis_size[0] + blockSizeZ.x - 1) / blockSizeZ.x,
+                    (axis_size[1] + blockSizeZ.y - 1) / blockSizeZ.y);
 
-    // Error after Kernel Launch?
-    err = cudaGetLastError();
-    if (err != cudaSuccess)
-    {
-        printf("Cuda error after kernel launch: %s\n", cudaGetErrorString(err));    
+        if (radiusBoxcar) g_DataCube_boxcar_filter<<<blockSizeZ, blockSizeZ>>>(d_data, d_data_box, word_size, axis_size[0], axis_size[1], slices_per_chunk, radiusBoxcar, 1);
+
+        cudaMemcpy(data + i * slices_per_chunk * axis_size[0] * axis_size[1] * word_size, d_data + radiusBoxcar * axis_size[0] * axis_size[1], slices_per_chunk * axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyDeviceToHost);
+        // Error after backkcopy??
+        err = cudaGetLastError();
+        if (err != cudaSuccess)
+        {
+            printf("Cuda error after backcopy: %s\n", cudaGetErrorString(err));
+        }
     }
 
-    cudaMemcpy(data, d_data, word_size * data_size * sizeof(char), cudaMemcpyDeviceToHost);
-    // Error after backkcopy??
-    err = cudaGetLastError();
-    if (err != cudaSuccess)
-    {
-        printf("Cuda error after backcopy: %s\n", cudaGetErrorString(err));
-    }
+    size_t last_chunk_size = axis_size[2] - (number_of_chunks - 1) * slices_per_chunk;
 
-    cudaFree(d_data);
-    cudaFree(data_box);
-
-    // Error after free mem??
-    err = cudaGetLastError();
-    if (err != cudaSuccess)
-    {
-        printf("Cuda error after freeing memory: %s\n", cudaGetErrorString(err));    
-    }
-}
-
-void GPU_DataCube_gauss_filter(char *data, int word_size, size_t data_size, size_t *axis_size, size_t radius, size_t n_iter)
-{
-printf("N-Iter: %lu\n", n_iter);
-
-    // Error at start?
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess)
-    {
-        printf("Cuda error at start: %s\n", cudaGetErrorString(err));    
-    }
-
-    // check for CUDA capable device
-    cudaFree(0);
-    int deviceCount;
-    //printf("wordSize: %i dataSize: %lu charSize: %lu\n", word_size, data_size, sizeof(char));
-    //printf("Size per char: %lu, Size per word: %lu, Size per float: %lu\n", sizeof(char), sizeof(char) * word_size, sizeof(double));
-    cudaGetDeviceCount(&deviceCount);
-    if (deviceCount == 0) {
-        printf("No CUDA devices found.\n");
-        exit(0);
-    }
-
-    // Allocate and copy Datacube data onto GPU
-    float *d_data;
-    float *data_box;
-
-    err = cudaGetLastError();
-    printf("%s\n", cudaGetErrorString(err));
-
-    err = cudaMalloc((void**)&d_data, data_size * word_size * sizeof(char));
-    if (err != cudaSuccess)
-    {
-        printf("%s\n", cudaGetErrorString(err));
-        exit(0);
-    }
-
-    size_t x_overlap = axis_size[1] * axis_size[2] * 2 * radius;
-    size_t y_overlap = axis_size[0] * axis_size[2] * 2 * radius;
+    // err = cudaMalloc((void**)&d_data, data_size * word_size * sizeof(char));
+    // if (err != cudaSuccess)
+    // {
+    //     printf("%s\n", cudaGetErrorString(err));
+    //     exit(0);
+    // }
 
 
-    err = cudaMalloc((void**)&data_box, (data_size + (x_overlap > y_overlap ? x_overlap : y_overlap)) * sizeof(float));
-    if (err != cudaSuccess)
-    {
-        printf("%s\n", cudaGetErrorString(err));
-        exit(0);
-    }
-
-    // Gauss Filter size in X Direction
-    dim3 blockSizeX(32,32);
-    dim3 gridSizeX((axis_size[2] + blockSizeX.x - 1) / blockSizeX.x ,
-                  (axis_size[1] + blockSizeX.y - 1) / blockSizeX.y);
-
-    cudaStream_t stream1, stream2;
-    cudaStreamCreate(&stream1);
-    cudaStreamCreate(&stream2);
-
-    char flag = 'X';
+    // err = cudaMalloc((void**)&d_data_box, (data_size + 
+    //                                         (x_overlap > y_overlap ? (x_overlap > z_overlap ? x_overlap : z_overlap) 
+    //                                         : (y_overlap > z_overlap ? y_overlap : z_overlap))) 
+    //                                         * sizeof(float));
+    // if (err != cudaSuccess)
+    // {
+    //     printf("%s\n", cudaGetErrorString(err));
+    //     exit(0);
+    // }
 
     // for (int i = 0; i < blockSizeX.x; i++)
     // {
@@ -311,8 +251,7 @@ printf("N-Iter: %lu\n", n_iter);
     //     }
     // }
 
-    cudaMemcpy(d_data, data, word_size * data_size * sizeof(char), cudaMemcpyHostToDevice);
-
+    cudaMemcpy(d_data + radiusBoxcar * axis_size[0] * axis_size[1], data + (number_of_chunks - 1) * slices_per_chunk * axis_size[0] * axis_size[1] * word_size, last_chunk_size * axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyHostToDevice);
     // Error after mem copy?
     err = cudaGetLastError();
     if (err != cudaSuccess)
@@ -327,7 +266,12 @@ printf("N-Iter: %lu\n", n_iter);
         printf("Cuda error before Xkernel launch: %s\n", cudaGetErrorString(err));    
     }
 
-    g_DataCube_gauss_filter_XDir<<<gridSizeX, blockSizeX, axis_size[0] * sizeof(float) + (axis_size[0] + 2 * radius) * sizeof(float)>>>(d_data, data_box, word_size, axis_size[0], axis_size[1], axis_size[2], radius, n_iter);
+        // Gauss Filter size in X Direction
+    blockSizeX = dim3(ceil((float)32 / number_of_chunks),32);
+    gridSizeX = dim3((last_chunk_size + blockSizeX.x - 1) / blockSizeX.x ,
+                  (axis_size[1] + blockSizeX.y - 1) / blockSizeX.y);
+
+    if (radiusGauss) g_DataCube_gauss_filter_XDir<<<gridSizeX, blockSizeX, axis_size[0] * sizeof(float) + (axis_size[0] + 2 * radiusGauss) * sizeof(float)>>>(d_data + radiusBoxcar * axis_size[0] * axis_size[1], d_data_box, word_size, axis_size[0], axis_size[1], last_chunk_size, radiusGauss, n_iter);
 
     cudaDeviceSynchronize();
 
@@ -339,8 +283,8 @@ printf("N-Iter: %lu\n", n_iter);
     }
 
     // Gauss Filter in Y Direction
-    dim3 blockSizeY(16,16);
-    dim3 gridSizeY((axis_size[2] + blockSizeY.x - 1) / blockSizeY.x,
+    blockSizeY = dim3(ceil((float)16 / number_of_chunks),16);
+    gridSizeY = dim3((last_chunk_size + blockSizeY.x - 1) / blockSizeY.x,
                   (axis_size[0] + blockSizeY.y - 1) / blockSizeY.y);
 
     // Error before Kernel Launch?
@@ -350,7 +294,7 @@ printf("N-Iter: %lu\n", n_iter);
         printf("Cuda error before Ykernel launch: %s\n", cudaGetErrorString(err));    
     }
 
-    g_DataCube_gauss_filter_YDir<<<gridSizeY, blockSizeY>>>(d_data, data_box, word_size, axis_size[0], axis_size[1], axis_size[2], radius, n_iter);
+    if (radiusGauss) g_DataCube_gauss_filter_YDir<<<gridSizeY, blockSizeY>>>(d_data + radiusBoxcar * axis_size[0] * axis_size[1], d_data_box, word_size, axis_size[0], axis_size[1], last_chunk_size, radiusGauss, n_iter);
 
     cudaDeviceSynchronize();
 
@@ -361,7 +305,14 @@ printf("N-Iter: %lu\n", n_iter);
         printf("Cuda error after Ykernel launch: %s\n", cudaGetErrorString(err));    
     }
 
-    cudaMemcpy(data, d_data, word_size * data_size * sizeof(char), cudaMemcpyDeviceToHost);
+    // Boxcar Filter in Z Direction
+    blockSizeZ = dim3(32,32);
+    gridSizeZ = dim3((axis_size[0] + blockSizeZ.x - 1) / blockSizeZ.x,
+                  (axis_size[1] + blockSizeZ.y - 1) / blockSizeZ.y);
+
+    if (radiusBoxcar) g_DataCube_boxcar_filter<<<blockSizeZ, blockSizeZ>>>(d_data, d_data_box, word_size, axis_size[0], axis_size[1], last_chunk_size, radiusBoxcar, 2);
+
+    cudaMemcpy(data + (number_of_chunks - 1) * slices_per_chunk * axis_size[0] * axis_size[1] * word_size, d_data + radiusBoxcar * axis_size[0] * axis_size[1], last_chunk_size * axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyDeviceToHost);
     // Error after backkcopy??
     err = cudaGetLastError();
     if (err != cudaSuccess)
@@ -370,7 +321,7 @@ printf("N-Iter: %lu\n", n_iter);
     }
 
     cudaFree(d_data);
-    cudaFree(data_box);
+    cudaFree(d_data_box);
 
     // Error after free mem??
     err = cudaGetLastError();
@@ -380,7 +331,7 @@ printf("N-Iter: %lu\n", n_iter);
     }
 }
 
-__global__ void g_DataCube_boxcar_filter(float *data, float *data_box, int word_size, size_t width, size_t height, size_t depth, size_t radius)
+__global__ void g_DataCube_boxcar_filter(float *data, float *data_box, int word_size, size_t width, size_t height, size_t depth, size_t radius, size_t chunck_type)
 {
     size_t x = blockIdx.x * blockDim.x + threadIdx.x;
     size_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -391,17 +342,14 @@ __global__ void g_DataCube_boxcar_filter(float *data, float *data_box, int word_
         data = data + (x + y * width);
         data_box = data_box + (x + y * width);
 
-        d_filter_boxcar_1d_flt(data, data_box, depth, radius, jump);
+        d_filter_chunk_boxcar_1d_flt(data, data_box, depth, radius, jump, chunck_type);
     }
 }
 
 __global__ void g_DataCube_gauss_filter_XDir(float *data, float *data_box, int word_size, size_t width, size_t height, size_t depth, size_t radius, size_t n_iter)
 {
-    size_t block_index = blockIdx.x * blockDim.y + blockIdx.y;
     size_t thread_count = blockDim.x * blockDim.y;
     size_t thread_index = threadIdx.x * blockDim.y + threadIdx.y;
-
-    size_t row_count = height * depth;
 
     const size_t filter_size = 2 * radius + 1;
 	const float inv_filter_size = 1.0 / filter_size;
@@ -409,17 +357,7 @@ __global__ void g_DataCube_gauss_filter_XDir(float *data, float *data_box, int w
     extern __shared__ float s_data[];
     float *s_data_box = &s_data[width];
 
-    size_t start_index = blockIdx.x * blockDim.x * width * height + blockIdx.y * blockDim.y * width;
-    // size_t last_column_index = min(start_index + (blockDim.x - 1) * width * height, start_index + (depth - 1 - blockIdx.x * blockDim.x) * width * height);
-    // size_t last_row_index = min(last_column_index + (blockDim.y - 1) * width, last_column_index + (height - 1 - blockIdx.y * blockDim.y) * width);
-    // size_t last_index = last_row_index + width - 1;
-
-    // bool test = true;
-    // while (test)
-    // {
-    //     test = *(char*)data + (last_index * word_size) == 'X';
-    // }
-    
+    size_t start_index = blockIdx.x * blockDim.x * width * height + blockIdx.y * blockDim.y * width;    
 
     for (int iter = 0; iter < blockDim.x * blockDim.y; iter++)
     {
@@ -502,7 +440,7 @@ __device__ void d_filter_boxcar_1d_flt(float *data, float *data_copy, const size
 	const size_t filter_size = 2 * filter_radius + 1;
 	const float inv_filter_size = 1.0 / filter_size;
 	size_t i;
-	
+
 	// Make copy of data, taking care of NaN
 	for(i = size; i--;) data_copy[(filter_radius + i) * jump] = FILTER_NAN(data[i * jump]);
 	
@@ -520,94 +458,47 @@ __device__ void d_filter_boxcar_1d_flt(float *data, float *data_copy, const size
 	return;
 }
 
-__device__ void d_filter_boxcar_1d_flt_YDir(float *data, float *data_copy, const size_t size, const size_t filter_radius, const size_t size_y)
+__device__ void d_filter_chunk_boxcar_1d_flt(float *data, float *data_copy, const size_t size, const size_t filter_radius, const size_t jump, size_t chunk_type)
 {
     // Define filter size
 	const size_t filter_size = 2 * filter_radius + 1;
 	const float inv_filter_size = 1.0 / filter_size;
 	size_t i;
-	
+
+    // Fill overlap regions
+    if (chunk_type == 0)
+    {
+        for(i = filter_radius; i--;) data_copy[i * jump] = 0.0;
+        for(i = filter_radius; i--;) data_copy[(size + filter_radius + i) * jump] = FILTER_NAN(data[(size + filter_radius + i) * jump]);
+    }
+    else if (chunk_type == 1)
+    {
+        for(i = filter_radius; i--;) data_copy[i * jump] = FILTER_NAN(data[i * jump]);
+        for(i = filter_radius; i--;) data_copy[(size + filter_radius + i) * jump] = FILTER_NAN(data[(size + filter_radius + i) * jump]);
+    }
+    else if (chunk_type == 2)
+    {
+        for(i = filter_radius; i--;) data_copy[i * jump] = FILTER_NAN(data[i * jump]);
+        for(i = filter_radius; i--;) data_copy[(size + filter_radius + i) * jump] = 0.0;
+    }
+    
+
 	// Make copy of data, taking care of NaN
-	for(i = size; i--;) data_copy[filter_radius + i] = FILTER_NAN(data[i]);
-	
-	// Fill overlap regions with 0
-	for(i = filter_radius; i--;) data_copy[i] = data_copy[size + filter_radius + i] = 0.0;
+	for(i = size; i--;) data_copy[(filter_radius + i) * jump] = FILTER_NAN(data[(filter_radius + i) * jump]);
 	
 	// Apply boxcar filter to last data point
-	data[size - 1] = 0.0;
-	for(i = filter_size; i--;) data[size - 1] += data_copy[size + i - 1];
-	data[size - 1] *= inv_filter_size;
+	data[(size + filter_radius - 1) * jump] = 0.0;
+	for(i = filter_size; i--;) data[(size + filter_radius- 1) * jump] += data_copy[(size + i - 1) * jump];
+	data[(size + filter_radius - 1) * jump] *= inv_filter_size;
 	
 	// Recursively apply boxcar filter to all previous data points
-	for(i = size - 1; i--;) data[i] = data[i + 1] + (data_copy[i] - data_copy[filter_size + i]) * inv_filter_size;
-	
-	return;
-}
+	for(i = size - 1; i--;) data[(filter_radius + i) * jump] = data[(filter_radius + i + 1) * jump] + (data_copy[i * jump] - data_copy[(filter_size + i) * jump]) * inv_filter_size;
 
-__device__ void d_filter_boxcar_1d_flt_ZDir(float *data, float *data_copy, const size_t size, const size_t filter_radius, const size_t size_z)
-{
-    // Define filter size
-	const size_t filter_size = 2 * filter_radius + 1;
-	const float inv_filter_size = 1.0 / filter_size;
-	size_t i;
-	
-	// Make copy of data, taking care of NaN
-	for(i = size; i--;) data_copy[filter_radius + i] = FILTER_NAN(data[i]);
-	
-	// Fill overlap regions with 0
-	for(i = filter_radius; i--;) data_copy[i] = data_copy[size + filter_radius + i] = 0.0;
-	
-	// Apply boxcar filter to last data point
-	data[size - 1] = 0.0;
-	for(i = filter_size; i--;) data[size - 1] += data_copy[size + i - 1];
-	data[size - 1] *= inv_filter_size;
-	
-	// Recursively apply boxcar filter to all previous data points
-	for(i = size - 1; i--;) data[i] = data[i + 1] + (data_copy[i] - data_copy[filter_size + i]) * inv_filter_size;
-	
-	return;
-}
-
-__device__ void d_filter_gauss_2d_flt(float *data, float *data_copy, float *data_row, float *data_col, const size_t size_x, const size_t size_y, const size_t n_iter, const size_t filter_radius)
-{
-	// Set up a few variables
-	const size_t size_xy = size_x * size_y;
-	float *ptr = data + size_xy;
-	float *ptr2;
-	
-	// Run row filter (along x-axis)
-	// This is straightforward, as the data are contiguous in x.
-	while(ptr > data)
-	{
-		ptr -= size_x;
-		for(size_t i = n_iter; i--;) d_filter_boxcar_1d_flt(ptr, data_row, size_x, filter_radius, 1);
-	}
-	
-	// Run column filter (along y-axis)
-	// This is more complicated, as the data are non-contiguous in y.
-	for(size_t x = size_x; x--;)
-	{
-		// Copy data into column array
-		ptr = data + size_xy - size_x + x;
-		ptr2 = data_copy + size_y;
-		while(ptr2 --> data_copy)
-		{
-			*ptr2 = *ptr;
-			ptr -= size_x;
-		}
-		
-		// Apply filter
-		for(size_t i = n_iter; i--;) d_filter_boxcar_1d_flt(data_copy, data_col, size_y, filter_radius, 1);
-		
-		// Copy column array back into data array
-		ptr = data + size_xy - size_x + x;
-		ptr2 = data_copy + size_y;
-		while(ptr2 --> data_copy)
-		{
-			*ptr = *ptr2;
-			ptr -= size_x;
-		}
-	}
+    // Write overlap elements at the end back to start of data for next chunk
+    if (chunk_type != 2)
+    {
+        for(i = filter_radius; i--;) data[(filter_radius + i) * jump] = data[(size + filter_radius + i) * jump];
+    }
 	
 	return;
 }

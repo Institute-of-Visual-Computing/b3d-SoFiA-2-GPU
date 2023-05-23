@@ -1903,7 +1903,6 @@ PUBLIC void DataCube_GPU_filter(DataCube *self, const double sigmaGauss, const d
 	size_t n_iter;
 	size_t filter_radius_gauss;
 	optimal_filter_size_dbl(sigmaGauss, &filter_radius_gauss, &n_iter);
-	const size_t size = self->axis_size[0] * self->axis_size[1] * self->word_size;
 
 	printf("Starting GPU Stuff\n");
 
@@ -1933,15 +1932,6 @@ PUBLIC void DataCube_boxcar_filter(DataCube *self, size_t radius)
 	check_null(self->data);
 	ensure(self->data_type == -32 || self->data_type == -64, ERR_USER_INPUT, "Cannot run boxcar filter on integer array.");
 	if(radius < 1) return;
-	
-	// Run on GPU
-	if (true)
-	{
-		printf("Starting GPU stuff\n");
-		GPU_DataCube_boxcar_filter(self->data, self->word_size, self->data_size, self->axis_size, radius);
-		printf("Finished GPU stuff\n");
-		return;
-	}
 
 	if(self->data_type == -32)
 	{
@@ -2045,12 +2035,6 @@ PUBLIC void DataCube_gaussian_filter(DataCube *self, const double sigma)
 	size_t filter_radius;
 	optimal_filter_size_dbl(sigma, &filter_radius, &n_iter);
 	const size_t size = self->axis_size[0] * self->axis_size[1] * self->word_size;
-	
-	if (true)
-	{
-		GPU_DataCube_gauss_filter(self->data, self->word_size, self->data_size, self->axis_size, filter_radius, n_iter);
-		return;
-	}
 
 	if(self->data_type == -32)
 	{
@@ -3959,12 +3943,8 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 			// Check if any smoothing requested
 			if(Array_dbl_get(kernels_spat, i) || Array_siz_get(kernels_spec, j))
 			{
-				// Print time
-				timestamp(start_time, start_clock);
 				// Smoothing required; create a copy of the original cube
 				DataCube *smoothedCube = DataCube_copy(self);
-				// Print time
-				timestamp(start_time, start_clock);
 				
 				// Set flux of already detected pixels to maskScaleXY * rms
 				if(maskScaleXY >= 0.0) DataCube_set_masked_8(smoothedCube, maskCube, maskScaleXY * rms);
