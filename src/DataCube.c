@@ -1896,6 +1896,8 @@ PUBLIC void DataCube_GPU_filter(DataCube *self, const double sigmaGauss, const d
 	check_null(self);
 	check_null(self->data);
 	ensure(self->data_type == -32 || self->data_type == -64, ERR_USER_INPUT, "Cannot run boxcar filter on integer array.");
+
+	if (!sigmaGauss && ! radiusBoxcar) {return;}
 	
 	// Set up parameters required for boxcar filter
 	// NOTE: We don't need to extract a copy of each image plane, as
