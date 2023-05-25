@@ -161,28 +161,39 @@ void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *ax
     }
 
     size_t remaining_slices = axis_size[2] - slices_per_chunk;
-    int i = 1;
+    int processed_chunks = 1;
 
     while(remaining_slices > slices_per_chunk)
     {
-        printf("Got to chunk %i with %lu slices remaining\n", i + 1, remaining_slices);
-
         //size_t remaining_slices = axis_size[2] - i * slices_per_chunk;
         size_t slices_to_copy = min(slices_per_chunk + radiusBoxcar, remaining_slices);
 
-        cudaMemcpy(d_data + radiusBoxcar * axis_size[0] * axis_size[1], data + i * slices_per_chunk * axis_size[0] * axis_size[1] * word_size, slices_to_copy *  axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_data + radiusBoxcar * axis_size[0] * axis_size[1], data + processed_chunks * slices_per_chunk * axis_size[0] * axis_size[1] * word_size, slices_to_copy *  axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyHostToDevice);
+
+        if (processed_chunks * slices_per_chunk < radiusBoxcar)
+        {
+            printf("Not enought slices processed yet. Filling beginning with zeroes\n");
+            cudaMemset(d_data, 0, (radiusBoxcar - processed_chunks * slices_per_chunk) * axis_size[0] * axis_size[1] * word_size);
+            cudaDeviceSynchronize();
+        }
 
         if (slices_to_copy < (slices_per_chunk + radiusBoxcar))
         {
             printf("Not enought slices remaining needed %lu slices but only had %lu left. filling rest with zeroes\n", slices_per_chunk + radiusBoxcar, slices_to_copy);
             float *zeroes = (float*)calloc((slices_per_chunk + radiusBoxcar - slices_to_copy) * axis_size[0] * axis_size[1], sizeof(float));
             //err = cudaMemcpy(d_data + (radiusBoxcar + slices_to_copy) * axis_size[0] * axis_size[1], zeroes, (slices_per_chunk + radiusBoxcar - slices_to_copy) * axis_size[0] * axis_size[1] * sizeof(float), cudaMemcpyHostToDevice);
-            err = cudaMemset(d_data + (radiusBoxcar + slices_to_copy) * axis_size[0] * axis_size[1], 0, (slices_per_chunk + radiusBoxcar - slices_to_copy) * axis_size[0] * axis_size[1] * sizeof(float));
+            err = cudaMemset(d_data + (radiusBoxcar + slices_to_copy) * axis_size[0] * axis_size[1], 0, (slices_per_chunk + radiusBoxcar - slices_to_copy) * axis_size[0] * axis_size[1] * word_size);
             if (err != cudaSuccess)
             {
-                printf("Cuda error at memSet Copy to device: %s\n", cudaGetErrorString(err));    
+                printf("Cuda error at memSet on device: %s\n", cudaGetErrorString(err));
             }
             cudaDeviceSynchronize();
+
+            float *test_data = (float*)malloc((slices_per_chunk + 2 * radiusBoxcar) * axis_size[0] * axis_size[1] * word_size);
+            cudaMemcpy(test_data, d_data, (slices_per_chunk + 2 * radiusBoxcar) * axis_size[0] * axis_size[1] * word_size, cudaMemcpyDeviceToHost);
+
+            for (int j = 0; j < slices_per_chunk + 2 * radiusBoxcar; j++) printf("first value in slice %i is %f\n", j, test_data[j * axis_size[0] * axis_size[1]]);
+            free(test_data);
         }
         
         // Error after mem copy?
@@ -191,8 +202,6 @@ void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *ax
         {
             printf("Cuda error at mem Copy to device: %s\n", cudaGetErrorString(err));    
         }
-
-        printf("Start boxcar kernel for chunk %i\n", i + 1);
 
         // Boxcar Filter in Z Direction
         dim3 blockSizeZ(32,32);
@@ -249,9 +258,7 @@ void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *ax
             printf("Cuda error after Ykernel launch: %s\n", cudaGetErrorString(err));    
         }
 
-        printf("Start back copy for chunk %i\n", i + 1);
-
-        cudaMemcpy(data + i * slices_per_chunk * axis_size[0] * axis_size[1] * word_size, d_data + radiusBoxcar * axis_size[0] * axis_size[1], slices_per_chunk * axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyDeviceToHost);
+        cudaMemcpy(data + processed_chunks * slices_per_chunk * axis_size[0] * axis_size[1] * word_size, d_data + radiusBoxcar * axis_size[0] * axis_size[1], slices_per_chunk * axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyDeviceToHost);
         // Error after backkcopy??
         err = cudaGetLastError();
         if (err != cudaSuccess)
@@ -261,9 +268,9 @@ void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *ax
 
         remaining_slices -= slices_per_chunk;
 
-        printf("Finished chunk %i\n", i + 1);
+        printf("Finished chunk %i\n", processed_chunks + 1);
 
-        i++;
+        processed_chunks++;
     }
 
     // err = cudaMalloc((void**)&d_data, data_size * word_size * sizeof(char));
@@ -300,9 +307,11 @@ void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *ax
 
     size_t last_chunk_size = remaining_slices;
 
-    if (last_chunk_size != 0)
+    if (last_chunk_size > 0)
     {
-        cudaMemcpy(d_data + radiusBoxcar * axis_size[0] * axis_size[1], data + number_of_chunks * slices_per_chunk * axis_size[0] * axis_size[1] * word_size, last_chunk_size * axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyHostToDevice);
+        printf("Now processing last chunk\n");
+
+        cudaMemcpy(d_data + radiusBoxcar * axis_size[0] * axis_size[1], data + processed_chunks * slices_per_chunk * axis_size[0] * axis_size[1] * word_size, last_chunk_size * axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyHostToDevice);
         // Error after mem copy?
         err = cudaGetLastError();
         if (err != cudaSuccess)
@@ -365,7 +374,7 @@ void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *ax
             printf("Cuda error after Ykernel launch: %s\n", cudaGetErrorString(err));    
         }
 
-        cudaMemcpy(data + number_of_chunks * slices_per_chunk * axis_size[0] * axis_size[1] * word_size, d_data + radiusBoxcar * axis_size[0] * axis_size[1], last_chunk_size * axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyDeviceToHost);
+        cudaMemcpy(data + processed_chunks * slices_per_chunk * axis_size[0] * axis_size[1] * word_size, d_data + radiusBoxcar * axis_size[0] * axis_size[1], last_chunk_size * axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyDeviceToHost);
         // Error after backkcopy??
         err = cudaGetLastError();
         if (err != cudaSuccess)
