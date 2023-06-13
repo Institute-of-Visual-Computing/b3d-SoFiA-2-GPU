@@ -2,9 +2,12 @@
 
 void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *axis_size, size_t radiusGauss, size_t n_iter, size_t radiusBoxcar)
 {
-    if (!radiusGauss && ! radiusBoxcar) {return;}
+    GPU_DataCube_filter_Chunked(data, word_size, data_size, axis_size, radiusGauss, n_iter, radiusBoxcar, 15);
+}
 
-    printf("N-Iter: %lu\n", n_iter);
+void GPU_DataCube_filter_Chunked(char *data, int word_size, size_t data_size, size_t *axis_size, size_t radiusGauss, size_t n_iter, size_t radiusBoxcar, size_t number_of_chunks)
+{
+    if (!radiusGauss && ! radiusBoxcar) {return;}
 
     // Error at start?
     cudaError_t err = cudaGetLastError();
@@ -29,9 +32,6 @@ void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *ax
     float *d_data;
     float *d_data_box;
 
-    err = cudaGetLastError();
-    printf("%s\n", cudaGetErrorString(err));
-
     size_t x_overlap = axis_size[1] * axis_size[2] * 2 * radiusGauss;
     size_t y_overlap = axis_size[0] * axis_size[2] * 2 * radiusGauss;
     size_t z_overlap = axis_size[0] * axis_size[1] * 2 * radiusBoxcar;
@@ -41,18 +41,17 @@ void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *ax
                             : (y_overlap > z_overlap ? y_overlap : z_overlap))
                         ) 
                         * sizeof(float);
-    size_t number_of_chunks = 25;
     size_t slices_per_chunk = axis_size[2] / number_of_chunks;
 
     x_overlap = slices_per_chunk * axis_size[1] * 2 * radiusGauss;
     y_overlap = slices_per_chunk * axis_size[0] * 2 * radiusGauss;
 
-    if (prop.totalGlobalMem < 2 * box_size)
-    {
-        number_of_chunks = ((2 * box_size) / prop.totalGlobalMem) + 1;
-        slices_per_chunk /= number_of_chunks;
-        slices_per_chunk++;
-    }
+    // if (prop.totalGlobalMem < 2 * box_size)
+    // {
+    //     number_of_chunks = ((2 * box_size) / prop.totalGlobalMem) + 1;
+    //     slices_per_chunk /= number_of_chunks;
+    //     slices_per_chunk++;
+    // }
 
     // if (slices_per_chunk < 2 * radiusBoxcar + 1)
     // {
@@ -61,8 +60,8 @@ void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *ax
     // }
 
     size_t chunk_overlap = x_overlap > y_overlap ? 
-                           (x_overlap > z_overlap ? x_overlap : z_overlap) : 
-                           (y_overlap > z_overlap ? y_overlap : z_overlap);
+                        (x_overlap > z_overlap ? x_overlap : z_overlap) : 
+                        (y_overlap > z_overlap ? y_overlap : z_overlap);
 
     err = cudaMalloc((void**)&d_data, (slices_per_chunk + 2 * radiusBoxcar) * axis_size[0] * axis_size[1] * word_size * sizeof(char));
     if (err != cudaSuccess)
@@ -85,8 +84,12 @@ void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *ax
         exit(0);
     }
 
+    size_t remaining_slices = axis_size[2];
+    int processed_chunks = 0;
+
     if (number_of_chunks > 1)
     {
+        // TODO protect against thin cubes, where the first copy with a large boxcar filter may not succeed
         cudaMemcpy(d_data + radiusBoxcar * axis_size[0] * axis_size[1], data, (slices_per_chunk + radiusBoxcar) * axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyHostToDevice);
 
         // Error after mem copy?
@@ -158,10 +161,10 @@ void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *ax
         {
             printf("Cuda error after backcopy: %s\n", cudaGetErrorString(err));
         }
-    }
 
-    size_t remaining_slices = axis_size[2] - slices_per_chunk;
-    int processed_chunks = 1;
+        remaining_slices -= slices_per_chunk;
+        processed_chunks++;
+    }
 
     while(remaining_slices > slices_per_chunk)
     {
@@ -170,16 +173,9 @@ void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *ax
 
         cudaMemcpy(d_data + radiusBoxcar * axis_size[0] * axis_size[1], data + processed_chunks * slices_per_chunk * axis_size[0] * axis_size[1] * word_size, slices_to_copy *  axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyHostToDevice);
 
-        if (processed_chunks * slices_per_chunk < radiusBoxcar)
-        {
-            printf("Not enought slices processed yet. Filling beginning with zeroes\n");
-            cudaMemset(d_data, 0, (radiusBoxcar - processed_chunks * slices_per_chunk) * axis_size[0] * axis_size[1] * word_size);
-            cudaDeviceSynchronize();
-        }
-
+        // If there are not enought slices left at the end fill the overlap region with zeroes where neccessary
         if (slices_to_copy < (slices_per_chunk + radiusBoxcar))
         {
-            printf("Not enought slices remaining needed %lu slices but only had %lu left. filling rest with zeroes\n", slices_per_chunk + radiusBoxcar, slices_to_copy);
             float *zeroes = (float*)calloc((slices_per_chunk + radiusBoxcar - slices_to_copy) * axis_size[0] * axis_size[1], sizeof(float));
             //err = cudaMemcpy(d_data + (radiusBoxcar + slices_to_copy) * axis_size[0] * axis_size[1], zeroes, (slices_per_chunk + radiusBoxcar - slices_to_copy) * axis_size[0] * axis_size[1] * sizeof(float), cudaMemcpyHostToDevice);
             err = cudaMemset(d_data + (radiusBoxcar + slices_to_copy) * axis_size[0] * axis_size[1], 0, (slices_per_chunk + radiusBoxcar - slices_to_copy) * axis_size[0] * axis_size[1] * word_size);
@@ -188,12 +184,6 @@ void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *ax
                 printf("Cuda error at memSet on device: %s\n", cudaGetErrorString(err));
             }
             cudaDeviceSynchronize();
-
-            float *test_data = (float*)malloc((slices_per_chunk + 2 * radiusBoxcar) * axis_size[0] * axis_size[1] * word_size);
-            cudaMemcpy(test_data, d_data, (slices_per_chunk + 2 * radiusBoxcar) * axis_size[0] * axis_size[1] * word_size, cudaMemcpyDeviceToHost);
-
-            for (int j = 0; j < slices_per_chunk + 2 * radiusBoxcar; j++) printf("first value in slice %i is %f\n", j, test_data[j * axis_size[0] * axis_size[1]]);
-            free(test_data);
         }
         
         // Error after mem copy?
@@ -268,8 +258,6 @@ void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *ax
 
         remaining_slices -= slices_per_chunk;
 
-        printf("Finished chunk %i\n", processed_chunks + 1);
-
         processed_chunks++;
     }
 
@@ -303,14 +291,10 @@ void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *ax
     //     }
     // }
 
-    printf("Got to last chunk\n");
-
     size_t last_chunk_size = remaining_slices;
 
     if (last_chunk_size > 0)
     {
-        printf("Now processing last chunk\n");
-
         cudaMemcpy(d_data + radiusBoxcar * axis_size[0] * axis_size[1], data + processed_chunks * slices_per_chunk * axis_size[0] * axis_size[1] * word_size, last_chunk_size * axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyHostToDevice);
         // Error after mem copy?
         err = cudaGetLastError();
@@ -528,27 +512,38 @@ __device__ void d_filter_chunk_boxcar_1d_flt(float *data, float *data_copy, cons
 	const float inv_filter_size = 1.0 / filter_size;
 	size_t i;
 
-    // Fill overlap regions
-    if (chunk_type == 0)
-    {
-        for(i = filter_radius; i--;) data_copy[i * jump] = 0.0;
-        for(i = filter_radius; i--;) data_copy[(size + filter_radius + i) * jump] = FILTER_NAN(data[(size + filter_radius + i) * jump]);
-    }
-    else if (chunk_type == 1)
+    if (chunk_type != 2)
     {
         for(i = filter_radius; i--;) data_copy[i * jump] = FILTER_NAN(data[i * jump]);
         for(i = filter_radius; i--;) data_copy[(size + filter_radius + i) * jump] = FILTER_NAN(data[(size + filter_radius + i) * jump]);
     }
-    else if (chunk_type == 2)
+    else
     {
         for(i = filter_radius; i--;) data_copy[i * jump] = FILTER_NAN(data[i * jump]);
         for(i = filter_radius; i--;) data_copy[(size + filter_radius + i) * jump] = 0.0;
     }
 
+    // // Fill overlap regions
+    // if (chunk_type == 0)
+    // {
+    //     for(i = filter_radius; i--;) data_copy[i * jump] = 0.0;
+    //     for(i = filter_radius; i--;) data_copy[(size + filter_radius + i) * jump] = FILTER_NAN(data[(size + filter_radius + i) * jump]);
+    // }
+    // else if (chunk_type == 1)
+    // {
+    //     for(i = filter_radius; i--;) data_copy[i * jump] = FILTER_NAN(data[i * jump]);
+    //     for(i = filter_radius; i--;) data_copy[(size + filter_radius + i) * jump] = FILTER_NAN(data[(size + filter_radius + i) * jump]);
+    // }
+    // else if (chunk_type == 2)
+    // {
+    //     for(i = filter_radius; i--;) data_copy[i * jump] = FILTER_NAN(data[i * jump]);
+    //     for(i = filter_radius; i--;) data_copy[(size + filter_radius + i) * jump] = 0.0;
+    // }
+
     // Write elements at the end of the data chunk back to the front end overlap for next chunk
     if (chunk_type != 2)
     {
-        for(i = filter_radius; i--;) data[i * jump] = data[(size + i) * jump];
+        for(i = 0; i < filter_radius; i++) data[i * jump] = data[(size + i) * jump];
     }
 
 	// Make copy of data, taking care of NaN
