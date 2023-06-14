@@ -1,11 +1,12 @@
 #include "Gpu.h"
 
-void GPU_DataCube_filter(char *data, int word_size, size_t data_size, size_t *axis_size, size_t radiusGauss, size_t n_iter, size_t radiusBoxcar)
+void GPU_DataCube_filter(char *data, char *originalData, int word_size, size_t data_size, size_t *axis_size, size_t radiusGauss, size_t n_iter, size_t radiusBoxcar)
 {
-    GPU_DataCube_filter_Chunked(data, word_size, data_size, axis_size, radiusGauss, n_iter, radiusBoxcar, 15);
+    // TODO let chunk ammount be calculated instead of hard coded
+    GPU_DataCube_filter_Chunked(data, originalData, word_size, data_size, axis_size, radiusGauss, n_iter, radiusBoxcar, 15);
 }
 
-void GPU_DataCube_filter_Chunked(char *data, int word_size, size_t data_size, size_t *axis_size, size_t radiusGauss, size_t n_iter, size_t radiusBoxcar, size_t number_of_chunks)
+void GPU_DataCube_filter_Chunked(char *data, char *originalData, int word_size, size_t data_size, size_t *axis_size, size_t radiusGauss, size_t n_iter, size_t radiusBoxcar, size_t number_of_chunks)
 {
     if (!radiusGauss && ! radiusBoxcar) {return;}
 
@@ -104,7 +105,7 @@ void GPU_DataCube_filter_Chunked(char *data, int word_size, size_t data_size, si
         dim3 gridSizeZ((axis_size[0] + blockSizeZ.x - 1) / blockSizeZ.x,
                     (axis_size[1] + blockSizeZ.y - 1) / blockSizeZ.y);
 
-        if (radiusBoxcar) g_DataCube_boxcar_filter<<<gridSizeZ, blockSizeZ>>>(d_data, d_data_box, word_size, axis_size[0], axis_size[1], slices_per_chunk, radiusBoxcar, 0);
+        if (radiusBoxcar) g_DataCube_boxcar_filter<<<gridSizeZ, blockSizeZ>>>(d_data, originalData, d_data_box, word_size, processed_chunks * slices_per_chunk, axis_size[0], axis_size[1], slices_per_chunk, radiusBoxcar, 0);
 
         cudaDeviceSynchronize();
 
@@ -198,7 +199,7 @@ void GPU_DataCube_filter_Chunked(char *data, int word_size, size_t data_size, si
         dim3 gridSizeZ((axis_size[0] + blockSizeZ.x - 1) / blockSizeZ.x,
                     (axis_size[1] + blockSizeZ.y - 1) / blockSizeZ.y);
 
-        if (radiusBoxcar) g_DataCube_boxcar_filter<<<gridSizeZ, blockSizeZ>>>(d_data, d_data_box, word_size, axis_size[0], axis_size[1], slices_per_chunk, radiusBoxcar, 1);
+        if (radiusBoxcar) g_DataCube_boxcar_filter<<<gridSizeZ, blockSizeZ>>>(d_data, originalData, d_data_box, word_size, processed_chunks * slices_per_chunk, axis_size[0], axis_size[1], slices_per_chunk, radiusBoxcar, 1);
 
         cudaDeviceSynchronize();
         
@@ -308,7 +309,7 @@ void GPU_DataCube_filter_Chunked(char *data, int word_size, size_t data_size, si
         dim3 gridSizeZ((axis_size[0] + blockSizeZ.x - 1) / blockSizeZ.x,
                     (axis_size[1] + blockSizeZ.y - 1) / blockSizeZ.y);
 
-        if (radiusBoxcar) g_DataCube_boxcar_filter<<<gridSizeZ, blockSizeZ>>>(d_data, d_data_box, word_size, axis_size[0], axis_size[1], last_chunk_size, radiusBoxcar, 2);
+        if (radiusBoxcar) g_DataCube_boxcar_filter<<<gridSizeZ, blockSizeZ>>>(d_data, originalData, d_data_box, word_size, processed_chunks * slices_per_chunk, axis_size[0], axis_size[1], last_chunk_size, radiusBoxcar, 2);
 
         cudaDeviceSynchronize();
 
@@ -378,7 +379,7 @@ void GPU_DataCube_filter_Chunked(char *data, int word_size, size_t data_size, si
     }
 }
 
-__global__ void g_DataCube_boxcar_filter(float *data, float *data_box, int word_size, size_t width, size_t height, size_t depth, size_t radius, size_t chunck_type)
+__global__ void g_DataCube_boxcar_filter(float *data, char *originalData, float *data_box, int word_size, const size_t startSlice, size_t width, size_t height, size_t depth, size_t radius, size_t chunck_type)
 {
     size_t x = blockIdx.x * blockDim.x + threadIdx.x;
     size_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -389,7 +390,7 @@ __global__ void g_DataCube_boxcar_filter(float *data, float *data_box, int word_
         data = data + (x + y * width);
         data_box = data_box + (x + y * width);
 
-        d_filter_chunk_boxcar_1d_flt(data, data_box, depth, radius, jump, chunck_type);
+        d_filter_chunk_boxcar_1d_flt(data, originalData, data_box, startSlice, depth, radius, jump, chunck_type);
     }
 }
 
@@ -505,7 +506,7 @@ __device__ void d_filter_boxcar_1d_flt(float *data, float *data_copy, const size
 	return;
 }
 
-__device__ void d_filter_chunk_boxcar_1d_flt(float *data, float *data_copy, const size_t size, const size_t filter_radius, const size_t jump, size_t chunk_type)
+__device__ void d_filter_chunk_boxcar_1d_flt(float *data, char *originalData, float *data_copy, const size_t startSlice, const size_t size, const size_t filter_radius, const size_t jump, size_t chunk_type)
 {
     // Define filter size
 	const size_t filter_size = 2 * filter_radius + 1;

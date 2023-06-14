@@ -127,7 +127,7 @@ PUBLIC Array_dbl *DataCube_scale_noise_spec (const DataCube *self, const noise_s
 PUBLIC DataCube  *DataCube_scale_noise_local(DataCube *self, const noise_stat statistic, const int range, size_t window_spat, size_t window_spec, size_t grid_spat, size_t grid_spec, const bool interpolate);
 
 // Spatial and spectral smoothing
-PUBLIC void       DataCube_GPU_filter(DataCube *self, const double sigmaGauss, const double radiusBoxcar);
+PUBLIC void       DataCube_GPU_filter(DataCube *self, char *originalData, const double sigmaGauss, const double radiusBoxcar);
 PUBLIC void       DataCube_boxcar_filter    (DataCube *self, size_t radius);
 PUBLIC void       DataCube_gaussian_filter  (DataCube *self, const double sigma);
 
