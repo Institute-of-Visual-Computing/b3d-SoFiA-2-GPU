@@ -1890,14 +1890,12 @@ PUBLIC DataCube *DataCube_scale_noise_local(DataCube *self, const noise_stat sta
 	return noiseCube;
 }
 
-PUBLIC void DataCube_GPU_filter(DataCube *self, const double sigmaGauss, const double radiusBoxcar)
+PUBLIC void DataCube_GPU_filter(DataCube *self, char *originalData, const double sigmaGauss, const double radiusBoxcar)
 {
 	// Sanity checks
 	check_null(self);
 	check_null(self->data);
 	ensure(self->data_type == -32 || self->data_type == -64, ERR_USER_INPUT, "Cannot run boxcar filter on integer array.");
-
-	if (!sigmaGauss && ! radiusBoxcar) {return;}
 	
 	// Set up parameters required for boxcar filter
 	// NOTE: We don't need to extract a copy of each image plane, as
@@ -3935,6 +3933,14 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 	else if(method == NOISE_STAT_MAD) rms = MAD_TO_STD * DataCube_stat_mad(self, 0.0, cadence, range);
 	else                              rms = DataCube_stat_gauss(self, cadence, range);
 
+	char *originalData;
+
+	if (true)
+	{
+		cudaMalloc((void**)&originalData, self->data_size * self->word_size);
+		cudaMemcpy(originalData, self->data, self->data_size * self->word_size, cudaMemcpyHostToDevice);
+	}
+
 	// Run S+C finder for all smoothing kernels
 	for(size_t i = 0; i < Array_dbl_get_size(kernels_spat); ++i)
 	{
@@ -3952,7 +3958,10 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 				if(maskScaleXY >= 0.0) DataCube_set_masked_8(smoothedCube, maskCube, maskScaleXY * rms);
 
 				// Spatial and spectral smoothing
-				if (true) {DataCube_GPU_filter(smoothedCube, Array_dbl_get(kernels_spat, i) / FWHM_CONST, Array_siz_get(kernels_spec, j) / 2);}
+				if (true) 
+				{
+					DataCube_GPU_filter(smoothedCube, originalData, Array_dbl_get(kernels_spat, i) / FWHM_CONST, Array_siz_get(kernels_spec, j) / 2);
+				}
 				else if(Array_dbl_get(kernels_spat, i) > 0.0) DataCube_gaussian_filter(smoothedCube, Array_dbl_get(kernels_spat, i) / FWHM_CONST);
 				else if(Array_siz_get(kernels_spec, j) > 0)   DataCube_boxcar_filter(smoothedCube, Array_siz_get(kernels_spec, j) / 2);
 
@@ -4336,7 +4345,7 @@ PRIVATE void DataCube_process_stack(const DataCube *self, DataCube *mask, Stack 
 					
 					// Check merging radius, assuming ellipsoid (with dx^2 / rx^2 + dy^2 / ry^2 + dz^2 / rz^2 = 1)
 					if(dx_squ + dy_squ + dz_squ > radius_xyz_squ) continue;
-					
+
 					// Get index, mask value and flux of neighbour
 					const size_t index = DataCube_get_index(mask, xx, yy, zz);
 					int32_t *ptr = ptr_mask + index;
