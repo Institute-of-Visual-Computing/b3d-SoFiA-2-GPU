@@ -1906,7 +1906,7 @@ PUBLIC void DataCube_GPU_filter(DataCube *self, char *originalData, const double
 
 	printf("Starting GPU Stuff\n");
 
-	GPU_DataCube_filter(self->data, self->word_size, self->data_size, self->axis_size, filter_radius_gauss, n_iter, radiusBoxcar);
+	GPU_DataCube_filter(self->data, originalData, self->word_size, self->data_size, self->axis_size, filter_radius_gauss, n_iter, radiusBoxcar);
 
 	printf("Finished GPU Stuff\n");
 }
@@ -3904,6 +3904,8 @@ PRIVATE void DataCube_get_xyz(const DataCube *self, const size_t index, size_t *
 
 PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double threshold, const double maskScaleXY, const noise_stat method, const int range, const int scaleNoise, const noise_stat snStatistic, const int snRange, const size_t snWindowXY, const size_t snWindowZ, const size_t snGridXY, const size_t snGridZ, const bool snInterpol, const time_t start_time, const clock_t start_clock)
 {
+	bool useGPU = true;
+
 	// Sanity checks
 	check_null(self);
 	check_null(self->data);
@@ -3934,16 +3936,27 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 	else                              rms = DataCube_stat_gauss(self, cadence, range);
 
 	char *originalData;
-
-	if (true)
+	char *maskData;
+	if (useGPU)
 	{
 		cudaMalloc((void**)&originalData, self->data_size * self->word_size);
-		cudaMemcpy(originalData, self->data, self->data_size * self->word_size, cudaMemcpyHostToDevice);
 	}
 
 	// Run S+C finder for all smoothing kernels
 	for(size_t i = 0; i < Array_dbl_get_size(kernels_spat); ++i)
 	{
+		// Smoothing required; create a copy of the original cube
+		DataCube *smoothedCube = DataCube_copy(self);
+				
+		// Set flux of already detected pixels to maskScaleXY * rms
+		if(maskScaleXY >= 0.0) DataCube_set_masked_8(smoothedCube, maskCube, maskScaleXY * rms);
+
+		if (useGPU)
+		{
+			cudaMemcpy(originalData, smoothedCube->data, smoothedCube->data_size * smoothedCube->word_size * sizeof(char), cudaMemcpyHostToDevice);
+			printf("method: %i", NOISE_STAT_MAD);
+		}
+
 		for(size_t j = 0; j < Array_siz_get_size(kernels_spec); ++j)
 		{
 			message("Smoothing kernel:  [%.1f] x [%zu]", Array_dbl_get(kernels_spat, i), Array_siz_get(kernels_spec, j));
@@ -3952,13 +3965,13 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 			if(Array_dbl_get(kernels_spat, i) || Array_siz_get(kernels_spec, j))
 			{
 				// Smoothing required; create a copy of the original cube
-				DataCube *smoothedCube = DataCube_copy(self);
+				smoothedCube = DataCube_copy(self);
 				
 				// Set flux of already detected pixels to maskScaleXY * rms
 				if(maskScaleXY >= 0.0) DataCube_set_masked_8(smoothedCube, maskCube, maskScaleXY * rms);
 
 				// Spatial and spectral smoothing
-				if (true) 
+				if (useGPU) 
 				{
 					DataCube_GPU_filter(smoothedCube, originalData, Array_dbl_get(kernels_spat, i) / FWHM_CONST, Array_siz_get(kernels_spec, j) / 2);
 				}
@@ -4014,6 +4027,11 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 			// Print time
 			timestamp(start_time, start_clock);
 		}
+	}
+
+	if (useGPU) 
+	{
+			cudaFree(originalData);
 	}
 	
 	return;
