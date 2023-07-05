@@ -3936,10 +3936,26 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 	else                              rms = DataCube_stat_gauss(self, cadence, range);
 
 	char *originalData;
+	char *originalMaskData;
 	char *maskData;
+	uint8_t testMask[8] = {0,1,2,3,4,5,6,7};
 	if (useGPU)
 	{
-		cudaMalloc((void**)&originalData, self->data_size * self->word_size);
+		cudaMalloc((void**)&originalData, self->data_size * self->word_size * sizeof(char));
+		cudaMalloc((void**)&originalMaskData, maskCube->data_size * maskCube->word_size * sizeof(char));
+		cudaMalloc((void**)&maskData, (self->data_size / 8) * sizeof(char));
+		char *h_maskData = malloc(self->data_size / 8);
+
+		cudaMemcpy(originalMaskData, maskCube->data, maskCube->data_size * maskCube->word_size * sizeof(char), cudaMemcpyHostToDevice);
+		cudaMemset(maskData, 0, self->data_size / 8);
+
+		size_t myAxisSize[4] = {(long unsigned int)8,(long unsigned int)1,(long unsigned int)1,(long unsigned int)0};
+
+		GPU_DataCube_copy_mask_8_to_1(maskData, originalMaskData, myAxisSize);
+		cudaMemcpy(h_maskData, maskData, self->data_size / 8, cudaMemcpyDeviceToHost);
+
+		for (int i = 0; i < 8; i++) {printf("%i\n", (int8_t)((maskCube->data)[i]));}
+		for (int i = 0; i < 1; i++) {printf("%i\n", ((uint8_t)((unsigned char*)h_maskData)[i]));}
 	}
 
 	// Run S+C finder for all smoothing kernels
@@ -3954,7 +3970,7 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 		if (useGPU)
 		{
 			cudaMemcpy(originalData, smoothedCube->data, smoothedCube->data_size * smoothedCube->word_size * sizeof(char), cudaMemcpyHostToDevice);
-			printf("method: %i", NOISE_STAT_MAD);
+			printf("method: %i\n", NOISE_STAT_MAD);
 		}
 
 		for(size_t j = 0; j < Array_siz_get_size(kernels_spec); ++j)

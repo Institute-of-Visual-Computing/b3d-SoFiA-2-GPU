@@ -455,6 +455,16 @@ void GPU_DataCube_filter_Chunked(char *data, char *originalData, int word_size, 
     }
 }
 
+void GPU_DataCube_copy_mask_8_to_1(char* maskData1, char* maskData8, size_t *axis_size)
+{
+    // Gauss Filter size in X Direction
+    dim3 blockSize(1024,1);
+    dim3 gridSize(1 , axis_size[1]);
+
+    g_DataCube_copy_mask_8_to_1<<<gridSize, blockSize>>>(maskData1, maskData8, axis_size[0], axis_size[1], axis_size[2]);
+    cudaDeviceSynchronize();
+}
+
 __global__ void g_DataCube_boxcar_filter(float *data, char *originalData, float *data_box, int word_size, const size_t startSlice, size_t width, size_t height, size_t depth, size_t radius, size_t chunck_type)
 {
     size_t x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -554,6 +564,44 @@ __global__ void g_DataCube_gauss_filter_YDir(float *data, float *data_box, int w
                             + y;
 
         for(size_t i = n_iter; i--;) d_filter_boxcar_1d_flt(data, data_box, height, radius, width);
+    }
+}
+
+__global__ void g_DataCube_copy_mask_8_to_1(char* maskData1, char* maskData8, size_t width, size_t height, size_t depth)
+{
+    size_t y = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t z = 0;
+
+    size_t jump = width * height;
+
+    while (z < depth)
+    {
+        size_t x = (blockIdx.x * blockDim.x + threadIdx.x) * 8;
+
+        while (x < width && y < height)
+        {
+            size_t indexSrc = width * y + x + z * jump;
+            size_t indexDst = width / 8 * y + x / 8 + z * jump;
+            int8_t *srcPtr = (int8_t*)maskData8 + indexSrc;
+            char *dstPtr = maskData1 + indexDst;
+
+            u_int8_t result = 0;
+
+            result |= (*srcPtr++ != 0) << 7;
+            result |= (*srcPtr++ != 0) << 6;
+            result |= (*srcPtr++ != 0) << 5;
+            result |= (*srcPtr++ != 0) << 4;
+            result |= (*srcPtr++ != 0) << 3;
+            result |= (*srcPtr++ != 0) << 2;
+            result |= (*srcPtr++ != 0) << 1;
+            result |= (*srcPtr != 0) << 0;
+
+            *maskData1 = (char)result;
+
+            x += blockDim.x * 8;
+        }
+
+        z++;
     }
 }
 
