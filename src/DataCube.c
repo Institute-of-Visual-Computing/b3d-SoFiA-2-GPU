@@ -3904,7 +3904,7 @@ PRIVATE void DataCube_get_xyz(const DataCube *self, const size_t index, size_t *
 
 PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double threshold, const double maskScaleXY, const noise_stat method, const int range, const int scaleNoise, const noise_stat snStatistic, const int snRange, const size_t snWindowXY, const size_t snWindowZ, const size_t snGridXY, const size_t snGridZ, const bool snInterpol, const time_t start_time, const clock_t start_clock)
 {
-	bool useGPU = true;
+	bool useGPU = false;
 
 	// Sanity checks
 	check_null(self);
@@ -3935,27 +3935,35 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 	else if(method == NOISE_STAT_MAD) rms = MAD_TO_STD * DataCube_stat_mad(self, 0.0, cadence, range);
 	else                              rms = DataCube_stat_gauss(self, cadence, range);
 
-	char *originalData;
+	char *d_original_Data;
 	char *originalMaskData;
-	char *maskData;
+	char *d_mask_Data;
 	uint8_t testMask[8] = {0,1,2,3,4,5,6,7};
 	if (useGPU)
 	{
-		cudaMalloc((void**)&originalData, self->data_size * self->word_size * sizeof(char));
-		cudaMalloc((void**)&originalMaskData, maskCube->data_size * maskCube->word_size * sizeof(char));
-		cudaMalloc((void**)&maskData, (self->data_size / 8) * sizeof(char));
-		char *h_maskData = malloc(self->data_size / 8);
+		cudaMalloc((void**)&d_original_Data, self->data_size * self->word_size * sizeof(char));
+		//cudaMalloc((void**)&originalMaskData, maskCube->data_size * maskCube->word_size * sizeof(char));
+		size_t d_mask_size = ceil(self->axis_size[0] / 8.0f) * self->axis_size[1] * self->axis_size[2] * sizeof(char);
+		cudaMalloc((void**)&d_mask_Data, d_mask_size);
+		//char *h_maskData = malloc(self->data_size / 8);
 
-		cudaMemcpy(originalMaskData, maskCube->data, maskCube->data_size * maskCube->word_size * sizeof(char), cudaMemcpyHostToDevice);
-		cudaMemset(maskData, 0, self->data_size / 8);
+		//cudaMemcpy(originalMaskData, maskCube->data, maskCube->data_size * maskCube->word_size * sizeof(char), cudaMemcpyHostToDevice);
+		cudaMemset(d_mask_Data, 0, d_mask_size);
 
 		size_t myAxisSize[4] = {(long unsigned int)8,(long unsigned int)1,(long unsigned int)1,(long unsigned int)0};
 
-		GPU_DataCube_copy_mask_8_to_1(maskData, originalMaskData, myAxisSize);
-		cudaMemcpy(h_maskData, maskData, self->data_size / 8, cudaMemcpyDeviceToHost);
+		//GPU_DataCube_copy_mask_8_to_1(d_mask_Data, originalMaskData, myAxisSize);
+		//cudaMemcpy(h_maskData, d_mask_Data, self->data_size / 8, cudaMemcpyDeviceToHost);
 
-		for (int i = 0; i < 8; i++) {printf("%i\n", (int8_t)((maskCube->data)[i]));}
-		for (int i = 0; i < 1; i++) {printf("%i\n", ((uint8_t)((unsigned char*)h_maskData)[i]));}
+		// for (int i = 0; i < 40000; i++) 
+		// {
+		// 	if ((maskCube->data)[i])
+		// 	{
+		// 		printf("%i: %i\n", i, (int8_t)((maskCube->data)[i]));
+		// 	}
+		// }
+		// for (int i = 0; i < 100; i++) {printf("%i\n", ((uint8_t)((unsigned char*)h_maskData)[i]));}
+		// exit(0);
 	}
 
 	// Run S+C finder for all smoothing kernels
@@ -3969,7 +3977,7 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 
 		if (useGPU)
 		{
-			cudaMemcpy(originalData, smoothedCube->data, smoothedCube->data_size * smoothedCube->word_size * sizeof(char), cudaMemcpyHostToDevice);
+			cudaMemcpy(d_original_Data, smoothedCube->data, smoothedCube->data_size * smoothedCube->word_size * sizeof(char), cudaMemcpyHostToDevice);
 			printf("method: %i\n", NOISE_STAT_MAD);
 		}
 
@@ -3989,7 +3997,7 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 				// Spatial and spectral smoothing
 				if (useGPU) 
 				{
-					DataCube_GPU_filter(smoothedCube, originalData, Array_dbl_get(kernels_spat, i) / FWHM_CONST, Array_siz_get(kernels_spec, j) / 2);
+					DataCube_GPU_filter(smoothedCube, d_original_Data, Array_dbl_get(kernels_spat, i) / FWHM_CONST, Array_siz_get(kernels_spec, j) / 2);
 				}
 				else if(Array_dbl_get(kernels_spat, i) > 0.0) DataCube_gaussian_filter(smoothedCube, Array_dbl_get(kernels_spat, i) / FWHM_CONST);
 				else if(Array_siz_get(kernels_spec, j) > 0)   DataCube_boxcar_filter(smoothedCube, Array_siz_get(kernels_spec, j) / 2);
@@ -4047,7 +4055,7 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 
 	if (useGPU) 
 	{
-			cudaFree(originalData);
+			cudaFree(d_original_Data);
 	}
 	
 	return;

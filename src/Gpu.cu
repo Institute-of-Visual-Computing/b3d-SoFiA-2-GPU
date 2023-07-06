@@ -426,13 +426,7 @@ void GPU_DataCube_filter_Chunked(char *data, char *originalData, int word_size, 
 
         if (radiusGauss && !radiusBoxcar)
         {
-            cudaMemcpy(originalData + processed_chunks * slices_per_chunk * axis_size[0] * axis_size[1] * word_size, d_data + radiusBoxcar * axis_size[0] * axis_size[1], last_chunk_size * axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyDeviceToDevice);
-            // Error after backkcopy??
-            err = cudaGetLastError();
-            if (err != cudaSuccess)
-            {
-                printf("Cuda error after backcopy: %s\n", cudaGetErrorString(err));
-            }
+            //g_DataCube_copy_back_smoothed_cube(originalData, d_data, word_size, axis_size[0], axis_size[1], last_chunk_size);
         }
 
         cudaMemcpy(data + processed_chunks * slices_per_chunk * axis_size[0] * axis_size[1] * word_size, d_data + radiusBoxcar * axis_size[0] * axis_size[1], last_chunk_size * axis_size[0] * axis_size[1] * word_size * sizeof(char), cudaMemcpyDeviceToHost);
@@ -458,7 +452,7 @@ void GPU_DataCube_filter_Chunked(char *data, char *originalData, int word_size, 
 void GPU_DataCube_copy_mask_8_to_1(char* maskData1, char* maskData8, size_t *axis_size)
 {
     // Gauss Filter size in X Direction
-    dim3 blockSize(1024,1);
+    dim3 blockSize(ceil(axis_size[0] / 8.0f),1);
     dim3 gridSize(1 , axis_size[1]);
 
     g_DataCube_copy_mask_8_to_1<<<gridSize, blockSize>>>(maskData1, maskData8, axis_size[0], axis_size[1], axis_size[2]);
@@ -605,6 +599,23 @@ __global__ void g_DataCube_copy_mask_8_to_1(char* maskData1, char* maskData8, si
     }
 }
 
+__global__ void g_DataCube_copy_back_smoothed_cube(char *originalData, float *data, int word_size, size_t width, size_t height, size_t depth)
+{
+    size_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t y = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t jump = width * height;
+
+    if (x < width && y < height)
+    {
+        size_t z = 0;
+        size_t index = x + y * width;
+        while (z < depth)
+        {
+            originalData[index + z * jump] = IS_NAN(originalData[index + z * jump]) ? originalData[index + z * jump] : data[index + z * jump];
+            z++;
+        }
+    }
+}
 
 __device__ void d_filter_boxcar_1d_flt(float *data, float *data_copy, const size_t size, const size_t filter_radius, const size_t jump)
 {

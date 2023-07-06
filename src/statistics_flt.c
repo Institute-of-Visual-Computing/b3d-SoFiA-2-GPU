@@ -571,6 +571,8 @@ float mad_val_flt(const float *data, const size_t size, const float value, const
 			++counter;
 		}
 	}
+
+	printf("Cadence: %lu Counter: %lu\n", cadence, counter);
 	
 	// Determine median
 	const float result = median_flt(data_copy, counter, false);
