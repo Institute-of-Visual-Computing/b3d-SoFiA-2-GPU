@@ -30,6 +30,8 @@ __global__ void g_DataCube_copy_mask_8_to_1(char* maskData1, char* maskData8, si
 
 __global__ void g_DataCube_copy_back_smoothed_cube(char *originalData, float *data, int word_size, size_t width, size_t height, size_t depth);
 
+__global__ void g_DataCube_stat_mad(float *data, float *data_box, size_t width, size_t height, size_t depth, const double value, const size_t cadence, const int range);
+
 
 __device__ void d_filter_boxcar_1d_flt(float *data, float *data_copy, const size_t size, const size_t filter_radius, const size_t jump);
 

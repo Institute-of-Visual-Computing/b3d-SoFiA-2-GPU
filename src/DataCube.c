@@ -2410,7 +2410,13 @@ PUBLIC void DataCube_mask_8(const DataCube *self, DataCube *maskCube, const doub
 		#pragma omp parallel for schedule(static)
 		for(size_t i = 0; i < self->data_size; ++i)
 		{
-			if(fabs(*(ptr_data + i)) > threshold) *(ptr_mask + i) = value;
+			if(fabs(*(ptr_data + i)) > threshold) {
+				*(ptr_mask + i) = value;
+				//printf("Add Mask with: %f\n", *(ptr_data+i));
+			}
+			else{
+				//printf("Skip Mask with: %f\n", *(ptr_data+i));
+			}
 		}
 	}
 	else
@@ -4037,6 +4043,8 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 				
 				// Add pixels above threshold to mask
 				DataCube_mask_8(smoothedCube, maskCube, threshold * rms_smooth, 1);
+
+				printf("threshhold: %f\n,", threshold);
 				
 				// Delete smoothed cube again
 				DataCube_delete(smoothedCube);

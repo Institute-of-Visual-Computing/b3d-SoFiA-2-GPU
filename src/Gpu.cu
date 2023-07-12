@@ -617,6 +617,31 @@ __global__ void g_DataCube_copy_back_smoothed_cube(char *originalData, float *da
     }
 }
 
+__global__ void g_DataCube_stat_mad(float *data, float *data_box, size_t width, size_t height, size_t depth, const double value, const size_t cadence, const int range)
+{
+    size_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t y = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t index = (y * blockDim.x + x);
+
+    float *ptr = data + width * height * depth - 1 - index * cadence;
+    float *ptr_box = data_box + index;
+
+    extern __shared__ float s_data[];
+    s_data[index] = 0.0;
+    int count = 0;
+
+    if (range == 0)
+    {
+        while (ptr >= data)
+        {
+            s_data[index] += IS_NOT_NAN(*ptr) ? (fabs(*ptr - value) - s_data[index]) / ++count : 0;
+            ptr -= (gridDim.x * gridDim.y) * (blockDim.x * blockDim.y);
+        }
+
+    }
+
+}
+
 __device__ void d_filter_boxcar_1d_flt(float *data, float *data_copy, const size_t size, const size_t filter_radius, const size_t jump)
 {
     // Define filter size
