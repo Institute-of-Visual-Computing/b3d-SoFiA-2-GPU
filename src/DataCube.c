@@ -4043,8 +4043,6 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 				
 				// Add pixels above threshold to mask
 				DataCube_mask_8(smoothedCube, maskCube, threshold * rms_smooth, 1);
-
-				printf("threshhold: %f\n,", threshold);
 				
 				// Delete smoothed cube again
 				DataCube_delete(smoothedCube);

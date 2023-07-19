@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <cuda_runtime.h>
+#include <thrust/sort.h>
+#include <thrust/device_vector.h>
 
 #include "common.h"
 #include "stddef.h"
