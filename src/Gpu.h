@@ -1,15 +1,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <cuda_runtime.h>
-#include <thrust/sort.h>
-#include <thrust/device_vector.h>
+#include <cooperative_groups.h>
 
 #include "common.h"
 #include "stddef.h"
 
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include "statistics_flt.h"
+
+void GPU_test_sdt_dev();
+
+void GPU_test_median();
 
 void GPU_DataCube_filter(char *data, char *originalData, int word_size, size_t data_size, size_t *axis_size, size_t radiusGauss, size_t n_iter, size_t radiusBoxcar); 
 
@@ -32,7 +38,13 @@ __global__ void g_DataCube_copy_mask_8_to_1(char* maskData1, char* maskData8, si
 
 __global__ void g_DataCube_copy_back_smoothed_cube(char *originalData, float *data, int word_size, size_t width, size_t height, size_t depth);
 
-__global__ void g_DataCube_stat_mad(float *data, float *data_box, size_t width, size_t height, size_t depth, const double value, const size_t cadence, const int range);
+__global__ void g_DataCube_stat_mad_flt(float *data, float *data_box, size_t width, size_t height, size_t depth, const float value, const size_t cadence, const int range);
+
+__global__ void g_DataCube_stat_mad_flt_2(float *data, float *data_box, size_t size, const float value, const size_t cadence, const int range);
+
+__global__ void g_std_dev_val_flt(float *data, float *data_box, const size_t size, const float value, const size_t cadence, const int range);
+
+__global__ void g_std_dev_val_flt_final_step(float *data_box);
 
 
 __device__ void d_filter_boxcar_1d_flt(float *data, float *data_copy, const size_t size, const size_t filter_radius, const size_t jump);
@@ -43,6 +55,11 @@ __device__ inline size_t get_index( const size_t x, const size_t y, const size_t
 {
 	return x + width * (y + height * z);
 }
+
+__device__ void d_sort_arr_flt(float *arr, size_t size);
+
+void sort_arr_flt(float *arr, size_t size);
+
 
 // Inline function to set a specific bit in an array
 inline void setByte(char* array, int index, bool value) 

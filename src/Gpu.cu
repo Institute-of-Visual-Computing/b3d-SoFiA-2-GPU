@@ -1,5 +1,103 @@
 #include "Gpu.h"
 
+void GPU_test_sdt_dev()
+{
+    float data[10] = {1,2,3,4,5,6,7,8,9,10};
+
+    printf("Ref: %f\n", std_dev_val_flt(data, 10, 0, 3, 0));
+
+    printf("Array to get median: ");
+
+	for (int i = 0 ; i < 10; i++){printf("%f ", data[i]);}
+
+	printf("\n");
+
+    float *d_data;
+    float *d_data_box;
+
+    cudaMalloc((void**)&d_data, 10 * sizeof(float));
+    cudaMalloc((void**)&d_data_box, 10 * sizeof(float));
+
+    cudaMemset(d_data_box, 0, 10 * sizeof(float));
+
+    cudaMemcpy(d_data, data, 10 * sizeof(float), cudaMemcpyHostToDevice);
+
+    cudaError_t err = cudaGetLastError();
+
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error at start: %s\n", cudaGetErrorString(err));  
+    }
+
+    cudaDeviceSynchronize();
+
+    dim3 blockSize(5);
+    dim3 gridSize(2);
+
+    g_std_dev_val_flt<<<gridSize, blockSize, blockSize.x * 2 * sizeof(float)>>>(d_data, d_data_box, 10, 0, 3, 0);
+
+    cudaDeviceSynchronize();
+
+    g_std_dev_val_flt_final_step<<<1,1>>>(d_data_box);
+
+    cudaDeviceSynchronize();
+
+    cudaMemcpy(data, d_data_box, 10 * sizeof(float), cudaMemcpyDeviceToHost);
+
+    printf("DataBox: ");
+
+	for (int i = 0 ; i < 10; i++){printf("%f ", data[i]);}
+
+	printf("\n");
+}
+
+void GPU_test_median()
+{
+    float data[10] = {81,8,43,4,20,1,13,7,12,9};
+
+    printf("Array to get median: ");
+
+	for (int i = 0 ; i < 10; i++){printf("%f ", data[i]);}
+
+	printf("\n");
+
+    float *d_data;
+    float *d_data_box;
+
+    cudaMalloc((void**)&d_data, 10 * sizeof(float));
+    cudaMalloc((void**)&d_data_box, 10 * sizeof(float));
+
+    cudaMemset(d_data_box, 0, 10 * sizeof(float));
+
+    cudaMemcpy(d_data, data, 10 * sizeof(float), cudaMemcpyHostToDevice);
+
+    cudaError_t err = cudaGetLastError();
+
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error at start: %s\n", cudaGetErrorString(err));  
+    }
+
+    cudaDeviceSynchronize();
+
+    dim3 blockSize(2);
+    dim3 gridSize(1);
+
+    g_DataCube_stat_mad_flt<<<gridSize, blockSize, blockSize.x * 14 * sizeof(float)>>>(d_data, d_data_box, 10, 1, 1, 0, 1, 0);
+
+    cudaDeviceSynchronize();
+
+    cudaMemcpy(data, d_data_box, 10 * sizeof(float), cudaMemcpyDeviceToHost);
+
+    cudaDeviceSynchronize();
+
+    printf("DataBox: ");
+
+	for (int i = 0 ; i < 10; i++){printf("%f ", data[i]);}
+
+	printf("\n");
+}
+
 void GPU_DataCube_filter(char *data, char *originalData, int word_size, size_t data_size, size_t *axis_size, size_t radiusGauss, size_t n_iter, size_t radiusBoxcar)
 {
     // const size_t number_of_chunks = 15;
@@ -617,7 +715,7 @@ __global__ void g_DataCube_copy_back_smoothed_cube(char *originalData, float *da
     }
 }
 
-__global__ void g_DataCube_stat_mad(float *data, float *data_box, size_t width, size_t height, size_t depth, const double value, const size_t cadence, const int range)
+__global__ void g_DataCube_stat_mad_flt(float *data, float *data_box, size_t width, size_t height, size_t depth, const float value, const size_t cadence, const int range)
 {
     const size_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const size_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -632,9 +730,9 @@ __global__ void g_DataCube_stat_mad(float *data, float *data_box, size_t width, 
     float *ptr_box_start = data_box + index * (max_medians_per_thread + 1);
     float *ptr_box = ptr_box_start + 1;
 
-    extern __shared__ double s_data_mad[];
-    double *s_data_start = s_data_mad + local_index * 6;
-    double *s_data_median_start = s_data_mad + thread_count * 6 + local_index;
+    extern __shared__ float s_data_mad[];
+    float *s_data_start = s_data_mad + local_index * 6;
+    float *s_data_median_start = s_data_mad + thread_count * 6 + local_index;
     int counter = 0;
 
     if (range == 0)
@@ -645,7 +743,7 @@ __global__ void g_DataCube_stat_mad(float *data, float *data_box, size_t width, 
             {
                 if (IS_NOT_NAN(*ptr))
                 {
-                    *s_data_start++ = fabs(*ptr - value);
+                    *(s_data_start + counter) = fabs(*ptr - value);
                     counter++;
                 }
                 ptr -= thread_count_total * cadence;
@@ -655,11 +753,10 @@ __global__ void g_DataCube_stat_mad(float *data, float *data_box, size_t width, 
             
             if (counter > 0)
             {
-                thrust::device_vector<double> d_vec = 
-                thrust::sort(s_data_start, s_data_start + counter);
-                *(s_data_mad + thread_count * 5 + local_index) = counter % 2 != 0 ? 
-                                                                *s_data_start + counter / 2 : 
-                                                                (*(s_data_start + counter / 2) + *(s_data_start + (counter / 2 - 1))) / 2;
+                d_sort_arr_flt(s_data_start, counter);
+                *s_data_median_start = counter % 2 != 0 ? 
+                                        *(s_data_start + counter / 2) : 
+                                        (*(s_data_start + counter / 2) + *(s_data_start + (counter / 2 - 1))) / 2;
                 *(s_data_start + 5) = 1;
             }
             __syncthreads();
@@ -667,23 +764,79 @@ __global__ void g_DataCube_stat_mad(float *data, float *data_box, size_t width, 
             counter = 2;
             while (local_index % counter == 0 && counter <= thread_count)
             {
-                *(s_data_start + local_index) = *(s_data_start + local_index) + *(s_data_start + local_index + counter / 2);
+                *(s_data_start + 5) = *(s_data_start + 5) + *(s_data_start + 5 + 6 * counter / 2);
                 counter *= 2;
             }
+
+            counter = 0;
 
             __syncthreads();
 
             if (local_index == 0)
             {
-                thrust::sort(s_data_median_start, s_data_median_start + (int)*s_data_start);
-                atomicAdd(data_box + width * height * depth - 1, 1);
-                data_box[(int)atomicAdd(data_box + width * height * depth - 1, 1)] = (int)*s_data_start % 2 != 0 ? 
-                                                                                    *(s_data_median_start + (int)*s_data_start / 2) :
-                                                                                    (*(s_data_median_start + (int)*s_data_start / 2) + *(s_data_median_start + (int)*s_data_start / 2 - 1)) / 2;
+                d_sort_arr_flt(s_data_median_start, (int)*(s_data_start + 5));
+                // data_box[(int)atomicAdd(data_box + width * height * depth - 1, 1)] = *s_data_median_start;
+                //thrust::sort(s_data_median_start, s_data_median_start + (int)*s_data_start);
+                data_box[(int)atomicAdd(data_box + width * height * depth - 1, 1)] = (int)*(s_data_start + 5) % 2 != 0 ? 
+                                                                                    *(s_data_median_start + (int)*(s_data_start + 5) / 2) :
+                                                                                    (*(s_data_median_start + (int)*(s_data_start + 5) / 2) + *(s_data_median_start + (int)*(s_data_start + 5) / 2 - 1)) / 2;
             }
             __syncthreads();
         }
     }
+}
+
+__global__ void g_std_dev_val_flt(float *data, float *data_box, const size_t size, const float value, const size_t cadence, const int range)
+{
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int thread_count = blockDim.x * gridDim.x;
+
+    extern __shared__ float s_data_sdf[];
+    float *s_data_sdf_start = s_data_sdf + threadIdx.x * 2;
+    *s_data_sdf_start = 0;
+    *(s_data_sdf_start + 1) = 0;
+
+    const float *ptr = data + size + index * cadence;
+    const float *ptr2 = data + cadence * thread_count - 1;
+
+    while (ptr > ptr2)
+    {
+        ptr -= cadence * thread_count;
+
+        if((range == 0 && IS_NOT_NAN(*ptr)) || (range < 0 && *ptr < 0.0) || (range > 0 && *ptr > 0.0))
+		{
+			*s_data_sdf_start += (*ptr - value) * (*ptr - value);
+			++*(s_data_sdf_start + 1);
+            *(data_box + 5) = gridDim.x;
+		}
+
+        
+    }
+
+    __syncthreads();
+
+    int counter = 2;
+    while (counter / 2 <= thread_count)
+    {
+        if (threadIdx.x % counter == 0 && threadIdx.x + counter / 2 < size)
+        {
+            *s_data_sdf_start += *(s_data_sdf_start + 2 * counter / 2);
+            *(s_data_sdf_start + 1) += *(s_data_sdf_start + 1 + 2 * counter / 2);
+        }
+        counter *= 2;
+        __syncthreads();
+    }
+
+    if (threadIdx.x == 0)
+    {
+        atomicAdd(data_box, *s_data_sdf_start);
+        atomicAdd(data_box + 1, *(s_data_sdf_start + 1));
+    }
+}
+
+__global__ void g_std_dev_val_flt_final_step(float *data_box)
+{
+    *data_box = sqrt(*data_box / *(data_box + 1));
 }
 
 __device__ void d_filter_boxcar_1d_flt(float *data, float *data_copy, const size_t size, const size_t filter_radius, const size_t jump)
@@ -763,4 +916,42 @@ __device__ void d_filter_chunk_boxcar_1d_flt(float *data, char *originalData, fl
 	for(i = size - 1; i--;) data[(filter_radius + i) * jump] = data[(filter_radius + i + 1) * jump] + (data_copy[i * jump] - data_copy[(filter_size + i) * jump]) * inv_filter_size;
 	
 	return;
+}
+
+__device__ void d_sort_arr_flt(float *arr, size_t size)
+{
+    float tmp;
+    for (int i = size + 1; --i;)
+    {
+        int j = size - 1;
+        while(j > size - i)
+        {
+            tmp = arr[j - 1];
+            if (arr[j - 1] > arr[j])
+            {
+                arr[j - 1] = arr[j];
+                arr[j] = tmp;
+            }
+            --j;
+        }
+    }
+}
+
+void sort_arr_flt(float *arr, size_t size)
+{
+    float tmp;
+    for (int i = size + 1; --i;)
+    {
+        int j = size - 1;
+        while(j > size - i)
+        {
+            tmp = arr[j - 1];
+            if (arr[j - 1] > arr[j])
+            {
+                arr[j - 1] = arr[j];
+                arr[j] = tmp;
+            }
+            --j;
+        }
+    }
 }
