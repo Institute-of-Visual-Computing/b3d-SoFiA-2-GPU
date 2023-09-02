@@ -226,27 +226,19 @@ void GPU_test_Boxcar_Z()
 
 }
 
-void GPU_test_sdt_dev()
+void GPU_test_sdt_dev(float *data, size_t size, size_t cadence, const int range)
 {
-    float data[10] = {1,2,3,4,5,6,7,8,9,10};
-
-    printf("Ref: %f\n", std_dev_val_flt(data, 10, 0, 3, 0));
-
-    printf("Array to get median: ");
-
-	for (int i = 0 ; i < 10; i++){printf("%f ", data[i]);}
-
-	printf("\n");
+    printf("Ref: %.3e\n", std_dev_val_flt(data, size, 0, cadence, range));
 
     float *d_data;
     float *d_data_box;
 
-    cudaMalloc((void**)&d_data, 10 * sizeof(float));
-    cudaMalloc((void**)&d_data_box, 10 * sizeof(float));
+    cudaMalloc((void**)&d_data, size * sizeof(float));
+    cudaMalloc((void**)&d_data_box, 2 * sizeof(float));
 
-    cudaMemset(d_data_box, 0, 10 * sizeof(float));
+    cudaMemset(d_data_box, 0, 2 * sizeof(float));
 
-    cudaMemcpy(d_data, data, 10 * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_data, data, size * sizeof(float), cudaMemcpyHostToDevice);
 
     cudaError_t err = cudaGetLastError();
 
@@ -257,10 +249,10 @@ void GPU_test_sdt_dev()
 
     cudaDeviceSynchronize();
 
-    dim3 blockSize(5);
-    dim3 gridSize(2);
+    dim3 blockSize(1024);
+    dim3 gridSize(1024);
 
-    g_std_dev_val_flt<<<gridSize, blockSize, blockSize.x * 2 * sizeof(float)>>>(d_data, d_data_box, 10, 0, 3, 0);
+    g_std_dev_val_flt<<<gridSize, blockSize, blockSize.x * 2 * sizeof(float)>>>(d_data, d_data_box, size, 0, cadence, range);
 
     cudaDeviceSynchronize();
 
@@ -268,13 +260,10 @@ void GPU_test_sdt_dev()
 
     cudaDeviceSynchronize();
 
-    cudaMemcpy(data, d_data_box, 10 * sizeof(float), cudaMemcpyDeviceToHost);
+    float noise[2] = {0,0};
+    cudaMemcpy(noise, d_data_box, 2 * sizeof(float), cudaMemcpyDeviceToHost);
 
-    printf("DataBox: ");
-
-	for (int i = 0 ; i < 10; i++){printf("%f ", data[i]);}
-
-	printf("\n");
+	for (int i = 0 ; i < 2; i++){printf("noise: %.3e\n", noise[i]);;}
 }
 
 void GPU_test_median()
@@ -332,7 +321,7 @@ void GPU_test_median()
 	printf("\n");
 }
 
-void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const double rms, const double sigmar_gauss, const size_t radius_boxcar)
+void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const double rms, const size_t cadence, const int range, const double threshold)
 {
     printf("Starting GPU\n");
 
@@ -345,7 +334,9 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
 
     size_t n_iter;
     size_t radius_gauss;
-    optimal_filter_size_dbl(sigmar_gauss, &radius_gauss, &n_iter);
+    const double FWHM_CONST = 2.0 * sqrt(2.0 * log(2.0));
+
+    size_t radius_boxcar;
 
     // check for CUDA capable device
     //cudaFree(0);
@@ -364,13 +355,21 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     // Define memory on GPU
     float *d_data;
     float *d_data_box;
+    float *d_data_duo;
     char *d_mask_data;
     char *d_original_mask;
 
     // Allocate and copy values from Host to Device
     cudaMalloc((void**)&d_data, data_size * sizeof(float));
     cudaMalloc((void**)&d_data_box, data_size * sizeof(float));
+    cudaMalloc((void**)&d_data_duo, 2 * sizeof(float));
     cudaMalloc((void**)&d_original_mask, data_size * sizeof(char));
+
+    err = cudaGetLastError();
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error after malloc: %s\n", cudaGetErrorString(err));    
+    }
 
     cudaMemcpy(d_data, data, data_size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_data_box, data, data_size * sizeof(float), cudaMemcpyHostToDevice);
@@ -397,9 +396,9 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
         printf("Cuda error after seting up mask data: %s\n", cudaGetErrorString(err));    
     }
 
-    dim3 blockSize(32,32);
-    dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
-                    (height + blockSize.y - 1) / blockSize.y);
+    dim3 blockSizeMS(32,32);
+    dim3 gridSizeMS((width + blockSizeMS.x - 1) / blockSizeMS.x,
+                    (height + blockSizeMS.y - 1) / blockSizeMS.y);
 
     dim3 blockSizeX(1024,1);
     dim3 gridSizeX(1,height);
@@ -410,87 +409,118 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     dim3 blockSizeZ(1024,1);
     dim3 gridSizeZ(width,1);
 
-
-    // Copy maskScaled data from d_data to d_data_box and replace blanks
-    if (maskScaleXY >= 0.0)
-    {
-        printf("Starting Kernel\n");
-
-        g_copyData_setMaskedScale8_removeBlanks<<<gridSize, blockSize>>>(d_data_box, d_data, d_original_mask, width, height, depth, maskScaleXY * rms);
-        //g_copyData_removeBlanks<<<gridSize, blockSize>>>(d_data_box, d_data, width, height, depth, maskScaleXY * rms);
-
-
-        err = cudaGetLastError();
-        if (err != cudaSuccess)
-        {
-            printf("Cuda error after Mask Kernel: %s\n", cudaGetErrorString(err));    
-        }
-        
-        if(radius_gauss > 0)
-        {
-            printf("Launching Gauss X…\n");
-
-            g_filter_gauss_X_flt<<<gridSizeX, blockSizeX, (radius_gauss * 3 + width * 2) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
-        
-            err = cudaGetLastError();
-            if (err != cudaSuccess)
-            {
-                printf("Cuda error after X Kernel: %s\n", cudaGetErrorString(err));    
-            }
-        }
-        
-        
-        if(radius_gauss > 0)
-        {
-            printf("Launching Gauss Y…\n");
-
-            g_filter_gauss_Y_flt<<<gridSizeY, blockSizeY, (radius_gauss * 3 + height * 2) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
-            
-            err = cudaGetLastError();
-            if (err != cudaSuccess)
-            {
-                printf("Cuda error after Y Kernel: %s\n", cudaGetErrorString(err));    
-            }
-        }
-
-        
-
-        if(radius_boxcar > 0) 
-        {
-            printf("Launching Boxcar Z…\n");
-
-            g_filter_boxcar_Z_flt<<<gridSizeZ, blockSizeZ, (radius_boxcar * 3 + depth * 2) * sizeof(float)>>>(d_data_box, width, height, depth, radius_boxcar);
-        
-            err = cudaGetLastError();
-            if (err != cudaSuccess)
-            {
-                printf("Cuda error after Z Kernel: %s\n", cudaGetErrorString(err));    
-            }
-        }
-        
-    }
-
-    cudaMemcpy(data, d_data_box, data_size * sizeof(float), cudaMemcpyDeviceToHost);
-
     for(size_t i = 0; i < Array_dbl_get_size(kernels_spat); ++i)
 	{
         for(size_t j = 0; j < Array_siz_get_size(kernels_spec); ++j)
 		{
-            // dim3 blockSize(32,32);
-            // dim3 gridSize((width + blockSize.x - 1) / blockSize.x,
-            //                 (height + blockSize.y - 1) / blockSize.y);
-            // // Copy maskScaled data from d_data to d_data_box and replace blanks
-            // if (maskScaleXY >= 0.0)
-            // {
-            //     g_copyData_setMaskedScale_removeBlanks<<<blockSize, gridSize>>>(d_data_box, d_data, d_mask_data, width, height, depth, maskScaleXY * rms);
-            // }
-            // TODO else if no maskScale
-            
+            if (Array_dbl_get(kernels_spat, i) || Array_siz_get(kernels_spec, j))
+            {
+                optimal_filter_size_dbl(Array_dbl_get(kernels_spat, i) / FWHM_CONST, &radius_gauss, &n_iter);
+                radius_boxcar = Array_siz_get(kernels_spec, j) / 2;
 
+                cudaMemset(d_data_duo, 0, 2 * sizeof(float));
 
-            // start Gauss Kernel in x direction
+                // Copy maskScaled data from d_data to d_data_box and replace blanks
+                if (maskScaleXY >= 0.0)
+                {
+                    printf("Starting Kernels\n");
+
+                    g_copyData_setMaskedScale8_removeBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, d_original_mask, width, height, depth, maskScaleXY * rms);
+
+                    err = cudaGetLastError();
+                    if (err != cudaSuccess)
+                    {
+                        printf("Cuda error after Mask Kernel: %s\n", cudaGetErrorString(err));    
+                    }
+                }
+                else
+                {
+                    g_copyData_removeBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, width, height, depth);
+                }
+                
+                if(radius_gauss > 0)
+                {
+                    printf("Launching Gauss X…\n");
+
+                    g_filter_gauss_X_flt<<<gridSizeX, blockSizeX, (radius_gauss * 3 + width * 2) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
+                
+                    err = cudaGetLastError();
+                    if (err != cudaSuccess)
+                    {
+                        printf("Cuda error after X Kernel: %s\n", cudaGetErrorString(err));    
+                    }
+                }
+                    
+                    
+                if(radius_gauss > 0)
+                {
+                    printf("Launching Gauss Y…\n");
+
+                    g_filter_gauss_Y_flt<<<gridSizeY, blockSizeY, (radius_gauss * 3 + height * 2) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
+                    
+                    err = cudaGetLastError();
+                    if (err != cudaSuccess)
+                    {
+                        printf("Cuda error after Y Kernel: %s\n", cudaGetErrorString(err));    
+                    }
+                }
+
+                    
+
+                if(radius_boxcar > 0) 
+                {
+                    printf("Launching Boxcar Z…\n");
+
+                    g_filter_boxcar_Z_flt<<<gridSizeZ, blockSizeZ, (radius_boxcar * 3 + depth * 2) * sizeof(float)>>>(d_data_box, width, height, depth, radius_boxcar);
+                
+                    err = cudaGetLastError();
+                    if (err != cudaSuccess)
+                    {
+                        printf("Cuda error after Z Kernel: %s\n", cudaGetErrorString(err));    
+                    }
+                }
+
+                printf("Starting Kernels for Mask\n");
+                g_addBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, width, height, depth);
+
+                g_std_dev_val_flt<<<1024, 1024, 1024 * 2 * sizeof(float)>>>(d_data_box, d_data_duo, data_size, 0.0f, cadence, range);
+                g_std_dev_val_flt_final_step<<<1,1>>>(d_data_duo);
+
+                float noise[2] = {0,0};
+                cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
+
+                printf("noise: %.3e\n", noise[0]);
+
+                g_Mask8<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_original_mask, width, height, depth, threshold, d_data_duo, 1);
+
+                err = cudaGetLastError();
+                if (err != cudaSuccess)
+                {
+                    printf("Cuda error after noise calc: %s\n", cudaGetErrorString(err));    
+                }
+            }
+            else
+            {
+                g_std_dev_val_flt<<<1024, 1024, 1024 * 2 * sizeof(float)>>>(d_data, d_data_duo, data_size, 0.0f, cadence, range);
+                g_std_dev_val_flt_final_step<<<1,1>>>(d_data_duo);
+
+                float noise[2] = {0,0};
+                cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
+
+                printf("noise: %.3e\n", noise[0]);
+
+                g_Mask8<<<gridSizeMS, blockSizeMS>>>(d_data, d_original_mask, width, height, depth, threshold, d_data_duo, 1);
+
+                err = cudaGetLastError();
+                if (err != cudaSuccess)
+                {
+                    printf("Cuda error after noise calc: %s\n", cudaGetErrorString(err));    
+                }
+            }
         }
     }
+
+    cudaMemcpy(maskdata, d_original_mask, data_size * sizeof(char), cudaMemcpyDeviceToHost);
 
     cudaDeviceSynchronize();
 
@@ -498,9 +528,10 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     cudaFree(d_data_box);
     cudaFree(d_mask_data);
     cudaFree(d_original_mask);
+    cudaFree(d_data_duo);
 }
 
-__global__ void g_copyData_removeBlanks(float *data_box, float *data, const size_t width, const size_t height, const size_t depth, const float value)
+__global__ void g_copyData_removeBlanks(float *data_box, float *data, const size_t width, const size_t height, const size_t depth)
 {
     size_t x = blockIdx.x * blockDim.x + threadIdx.x;
     size_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -512,6 +543,22 @@ __global__ void g_copyData_removeBlanks(float *data_box, float *data, const size
     while (index < width * height * depth)
     {
         data_box[index] = FILTER_NAN(data[index]);
+        index += width * height;
+    }
+}
+
+__global__ void g_addBlanks(float *data_box, float* data, const size_t width, const size_t height, const size_t depth)
+{
+    size_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x >= width || y >= height) {return;}
+
+    size_t index = x + y * width;
+
+    while (index < width * height * depth)
+    {
+        if(IS_NAN(data[index])) data_box[index] = NAN;
         index += width * height;
     }
 }
@@ -608,10 +655,10 @@ __global__ void g_filter_gauss_X_flt(float *data, const size_t width, const size
 
     for (int z = 0; z < depth; ++z)
     {
-        inline size_t index = x + y * width + z * width * height;
+        //inline size_t index = x + y * width + z * width * height;
         while(x < width && y < height)
         {
-            *(s_data_src + x) = data[index];
+            *(s_data_src + x) = data[x + y * width + z * width * height];
             x += blockDim.x;
         }
 
@@ -640,7 +687,7 @@ __global__ void g_filter_gauss_X_flt(float *data, const size_t width, const size
 
         while(x < width && y < height)
         {
-            data[index] = *(s_data_src + x);
+            data[x + y * width + z * width * height] = *(s_data_src + x);
             x += blockDim.x;
         }
         x = threadIdx.x;
@@ -666,10 +713,10 @@ __global__ void g_filter_gauss_Y_flt(float *data, const size_t width, const size
 
     for (int z = 0; z < depth; ++z)
     {
-        inline size_t index = x + y * width + z * width * height;
+        //inline size_t index = x + y * width + z * width * height;
         while(x < width && y < height)
         {
-            *(s_data_src + y) = data[index];
+            *(s_data_src + y) = data[x + y * width + z * width * height];
             y += blockDim.y;
         }
 
@@ -698,7 +745,7 @@ __global__ void g_filter_gauss_Y_flt(float *data, const size_t width, const size
 
         while(x < width && y < height)
         {
-            data[index] = *(s_data_src + y);
+            data[x + y * width + z * width * height] = *(s_data_src + y);
             y += blockDim.y;
         }
         y = threadIdx.y;
@@ -724,10 +771,10 @@ __global__ void g_filter_boxcar_Z_flt(float *data, const size_t width, const siz
 
     for (int y = 0; y < height; ++y)
     {
-        inline size_t index = x + y * width + z * width * height;
+        //inline size_t index = x + y * width + z * width * height;
         while(x < width && z < depth)
         {
-            *(s_data_src + z) = data[index];
+            *(s_data_src + z) = data[x + y * width + z * width * height];
             z += blockDim.x;
         }
 
@@ -750,10 +797,26 @@ __global__ void g_filter_boxcar_Z_flt(float *data, const size_t width, const siz
 
         while(x < width && z < depth)
         {
-            data[index] = *(s_data_dst + z);
+            data[x + y * width + z * width * height] = *(s_data_dst + z);
             z += blockDim.x;
         }
         z = threadIdx.x;
+    }
+}
+
+__global__ void g_Mask8(float *data_box, char *maskData8, const size_t width, const size_t height, const size_t depth, const double threshold, float *rms_smooth, const int8_t value)
+{
+    size_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x >= width || y >= height) {return;}
+
+    size_t index = x + y * width;
+
+    while (index < width * height * depth)
+    {
+        if (fabs(data_box[index]) > threshold * (*rms_smooth)) {maskData8[index] = (char)1;}
+        index += width * height;
     }
 }
 
@@ -1434,16 +1497,14 @@ __global__ void g_std_dev_val_flt(float *data, float *data_dst_duo, const size_t
 			*s_data_sdf_start += (*ptr - value) * (*ptr - value);
 			++*(s_data_sdf_start + 1);
 		}
-
-        
     }
 
     __syncthreads();
 
     int counter = 2;
-    while (counter / 2 <= thread_count)
+    while (counter / 2 <= blockDim.x)
     {
-        if (threadIdx.x % counter == 0 && threadIdx.x + counter / 2 < size)
+        if (threadIdx.x % counter == 0)
         {
             *s_data_sdf_start += *(s_data_sdf_start + 2 * counter / 2);
             *(s_data_sdf_start + 1) += *(s_data_sdf_start + 1 + 2 * counter / 2);

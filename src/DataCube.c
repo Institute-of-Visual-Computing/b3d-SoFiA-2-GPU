@@ -3911,14 +3911,6 @@ PRIVATE void DataCube_get_xyz(const DataCube *self, const size_t index, size_t *
 PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double threshold, const double maskScaleXY, const noise_stat method, const int range, const int scaleNoise, const noise_stat snStatistic, const int snRange, const size_t snWindowXY, const size_t snWindowZ, const size_t snGridXY, const size_t snGridZ, const bool snInterpol, const time_t start_time, const clock_t start_clock)
 {
 	bool useGPU = true;
-	//GPU_test_current();
-	//GPU_test_sdt_dev();
-	//GPU_test_median();
-	//GPU_test_Gauss_Y();
-	//GPU_test_Boxcar_Z();
-
-	//exit(1);
-
 
 	// Sanity checks
 	check_null(self);
@@ -3944,95 +3936,97 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 	// Measure noise in original cube with sampling "cadence"
 	double rms;
 	double rms_smooth;
-	
+
 	if(method == NOISE_STAT_STD)      rms = DataCube_stat_std(self, 0.0, cadence, range);
 	else if(method == NOISE_STAT_MAD) rms = MAD_TO_STD * DataCube_stat_mad(self, 0.0, cadence, range);
 	else                              rms = DataCube_stat_gauss(self, cadence, range);
 
-	// Run S+C finder for all smoothing kernels
-	for(size_t i = 0; i < Array_dbl_get_size(kernels_spat); ++i)
+	//GPU_test_current();
+	GPU_test_sdt_dev((float*)self->data, self->data_size, cadence, range);
+	//GPU_test_median();
+	//GPU_test_Gauss_Y();
+	//GPU_test_Boxcar_Z();
+	printf("RMS: %.3e\n", rms);
+	//exit(1);
+
+	if (useGPU)
 	{
-		// Smoothing required; create a copy of the original cube
-		DataCube *smoothedCube = DataCube_copy(self);
-
-		for(size_t j = 0; j < Array_siz_get_size(kernels_spec); ++j)
+		GPU_DataCube_filter_flt(self->data, maskCube->data, self->data_size, self->axis_size, kernels_spat, kernels_spec, maskScaleXY, rms, cadence, range, threshold);
+	}
+	else
+	{
+		// Run S+C finder for all smoothing kernels
+		for(size_t i = 0; i < Array_dbl_get_size(kernels_spat); ++i)
 		{
-			message("Smoothing kernel:  [%.1f] x [%zu]", Array_dbl_get(kernels_spat, i), Array_siz_get(kernels_spec, j));
-			
-			// Check if any smoothing requested
-			if(Array_dbl_get(kernels_spat, i) || Array_siz_get(kernels_spec, j))
+			// Smoothing required; create a copy of the original cube
+			DataCube *smoothedCube = DataCube_copy(self);
+
+			for(size_t j = 0; j < Array_siz_get_size(kernels_spec); ++j)
 			{
-				// Smoothing required; create a copy of the original cube
-				smoothedCube = DataCube_copy(self);
+				message("Smoothing kernel:  [%.1f] x [%zu]", Array_dbl_get(kernels_spat, i), Array_siz_get(kernels_spec, j));
 				
-				// Set flux of already detected pixels to maskScaleXY * rms
-				//if(maskScaleXY >= 0.0) DataCube_set_masked_8(smoothedCube, maskCube, maskScaleXY * rms);
-
-				if (useGPU)
+				// Check if any smoothing requested
+				if(Array_dbl_get(kernels_spat, i) || Array_siz_get(kernels_spec, j))
 				{
-					//GPU_DataCube_filter_flt(testData, maskCube->data, self->data, self->data_size, self->axis_size, kernels_spat, kernels_spec, maskScaleXY, rms);
-				}
+					// Smoothing required; create a copy of the original cube
+					smoothedCube = DataCube_copy(self);
+					
+					// Set flux of already detected pixels to maskScaleXY * rms
+					if(maskScaleXY >= 0.0) DataCube_set_masked_8(smoothedCube, maskCube, maskScaleXY * rms);
 
-				// Spatial and spectral smoothing
-				if (useGPU)
-				{
-					if (Array_dbl_get(kernels_spat, i) > 0.0 || Array_siz_get(kernels_spec, j) > 0) GPU_DataCube_filter_flt(smoothedCube->data, maskCube->data, smoothedCube->data_size, smoothedCube->axis_size, kernels_spat, kernels_spec, maskScaleXY, rms, Array_dbl_get(kernels_spat, i) / FWHM_CONST, Array_siz_get(kernels_spec, j) / 2);
-				}
-
-				else
-				{
+					// Spatial and spectral smoothing
 					if(Array_dbl_get(kernels_spat, i) > 0.0) DataCube_gaussian_filter(smoothedCube, Array_dbl_get(kernels_spat, i) / FWHM_CONST);
 					if(Array_siz_get(kernels_spec, j) > 0)   DataCube_boxcar_filter(smoothedCube, Array_siz_get(kernels_spec, j) / 2);
-				}
 
-				// Copy original blanks into smoothed cube again
-				// (these were set to 0 during smoothing)
-				DataCube_copy_blanked(smoothedCube, self);
-				
-				// Scale noise if requested
-				if(scaleNoise == 1)
-				{
-					message("Correcting for noise variations along spectral axis.\n");
-					DataCube_scale_noise_spec(smoothedCube, snStatistic, snRange);
+					// Copy original blanks into smoothed cube again
+					// (these were set to 0 during smoothing)
+					DataCube_copy_blanked(smoothedCube, self);
+					
+					// Scale noise if requested
+					if(scaleNoise == 1)
+					{
+						message("Correcting for noise variations along spectral axis.\n");
+						DataCube_scale_noise_spec(smoothedCube, snStatistic, snRange);
+					}
+					else if(scaleNoise == 2)
+					{
+						message("Correcting for local noise variations.");
+						DataCube *noiseCube = DataCube_scale_noise_local(
+							smoothedCube,
+							snStatistic,
+							snRange,
+							snWindowXY,
+							snWindowZ,
+							snGridXY,
+							snGridZ,
+							snInterpol
+						);
+						DataCube_delete(noiseCube);
+					}
+					
+					// Calculate the RMS of the smoothed cube
+					if(method == NOISE_STAT_STD)      rms_smooth = DataCube_stat_std(smoothedCube, 0.0, cadence, range);
+					else if(method == NOISE_STAT_MAD) rms_smooth = MAD_TO_STD * DataCube_stat_mad(smoothedCube, 0.0, cadence, range);
+					else                              rms_smooth = DataCube_stat_gauss(smoothedCube, cadence, range);
+					
+					message("Noise level:       %.3e", rms_smooth);
+					
+					// Add pixels above threshold to mask
+					DataCube_mask_8(smoothedCube, maskCube, threshold * rms_smooth, 1);
+					
+					// Delete smoothed cube again
+					DataCube_delete(smoothedCube);
 				}
-				else if(scaleNoise == 2)
+				else
 				{
-					message("Correcting for local noise variations.");
-					DataCube *noiseCube = DataCube_scale_noise_local(
-						smoothedCube,
-						snStatistic,
-						snRange,
-						snWindowXY,
-						snWindowZ,
-						snGridXY,
-						snGridZ,
-						snInterpol
-					);
-					DataCube_delete(noiseCube);
+					// No smoothing required; apply threshold to original cube
+					message("Noise level:       %.3e", rms);
+					DataCube_mask_8(self, maskCube, threshold * rms, 1);
 				}
 				
-				// Calculate the RMS of the smoothed cube
-				if(method == NOISE_STAT_STD)      rms_smooth = DataCube_stat_std(smoothedCube, 0.0, cadence, range);
-				else if(method == NOISE_STAT_MAD) rms_smooth = MAD_TO_STD * DataCube_stat_mad(smoothedCube, 0.0, cadence, range);
-				else                              rms_smooth = DataCube_stat_gauss(smoothedCube, cadence, range);
-				
-				message("Noise level:       %.3e", rms_smooth);
-				
-				// Add pixels above threshold to mask
-				DataCube_mask_8(smoothedCube, maskCube, threshold * rms_smooth, 1);
-				
-				// Delete smoothed cube again
-				DataCube_delete(smoothedCube);
+				// Print time
+				timestamp(start_time, start_clock);
 			}
-			else
-			{
-				// No smoothing required; apply threshold to original cube
-				message("Noise level:       %.3e", rms);
-				DataCube_mask_8(self, maskCube, threshold * rms, 1);
-			}
-			
-			// Print time
-			timestamp(start_time, start_clock);
 		}
 	}
 	return;

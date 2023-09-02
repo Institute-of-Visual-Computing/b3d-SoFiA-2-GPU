@@ -24,16 +24,18 @@ void GPU_test_Gauss_Y();
 
 void GPU_test_Boxcar_Z();
 
-void GPU_test_sdt_dev();
+void GPU_test_sdt_dev(float *data, size_t size, size_t cadence, const int range);
 
 void GPU_test_median();
 
 void GPU_test_copy_originalMask();
 
-void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const double rms, const double sigmar_gauss, const size_t radius_boxcar);
+void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const double rms, const size_t cadence, const int range, const double threshold);
 
 // copies data into data_box. Values are set to zero where they are NaN
-__global__ void g_copyData_removeBlanks(float *data_box, float *data, const size_t width, const size_t height, const size_t depth, const float value);
+__global__ void g_copyData_removeBlanks(float *data_box, float *data, const size_t width, const size_t height, const size_t depth);
+
+__global__ void g_addBlanks(float *data_box, float* data, const size_t width, const size_t height, const size_t depth);
 
 // copies data into data_box. While doing this data is masked by the mask data and set to their flux value where the mask is not zero. Values are set to zero where they are NaN
 __global__ void g_copyData_setMaskedScale1_removeBlanks(float *data_box, float *data, char *maskData1, const size_t width, const size_t height, const size_t depth, const float value);
@@ -52,6 +54,8 @@ __global__ void g_filter_gauss_X_flt(float *data, const size_t width, const size
 __global__ void g_filter_gauss_Y_flt(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius, const size_t n_iter);
 
 __global__ void g_filter_boxcar_Z_flt(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius);
+
+__global__ void g_Mask8(float *data_box, char *maskData8, const size_t width, const size_t height, const size_t depth, const double threshold, float *rms_smooth, const int8_t value);
 
 
 void GPU_DataCube_filter(char *data, char *originalData, int word_size, size_t data_size, size_t *axis_size, size_t radiusGauss, size_t n_iter, size_t radiusBoxcar); 
