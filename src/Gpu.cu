@@ -411,8 +411,8 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
         printf("cudaMemGetInfo failed: %s\n", cudaGetErrorString(cuda_status));
     }
 
-    printf("Allocating %fMB for the duo\n", 3 * sizeof(float) / (1024.0f * 1024.0f));
-    cudaMalloc((void**)&d_data_duo, 3 * sizeof(float));
+    printf("Allocating %fMB for the duo\n", 2 * sizeof(float) / (1024.0f * 1024.0f));
+    cudaMalloc((void**)&d_data_duo, 2 * sizeof(float));
 
     err = cudaGetLastError();
     if (err != cudaSuccess)
@@ -494,7 +494,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
 	{
         for(size_t j = 0; j < Array_siz_get_size(kernels_spec); ++j)
 		{
-            cudaMemset(d_data_duo, 0, 3 * sizeof(float));
+            cudaMemset(d_data_duo, 0, 2 * sizeof(float));
 
             if (Array_dbl_get(kernels_spat, i) || Array_siz_get(kernels_spec, j))
             {
@@ -572,16 +572,15 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 cudaDeviceSynchronize();
 
                 float noise[2] = {0,0};
-                cudaMemcpy(noise, d_data_duo, 3 * sizeof(float), cudaMemcpyDeviceToHost);
+                cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
 
                 printf("noise: %.3e\n", noise[0]);
                 printf("Count: %.3e\n", noise[1]);
-                printf("Debug: %.3e\n", noise[2]);
 
                 g_std_dev_val_flt_final_step<<<1,1>>>(d_data_duo);
                 cudaDeviceSynchronize();
 
-                cudaMemcpy(noise, d_data_duo, 3 * sizeof(float), cudaMemcpyDeviceToHost);
+                cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
 
                 printf("Final noise: %.3e\n\n", noise[0]);
 
@@ -601,7 +600,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 cudaDeviceSynchronize();
 
                 float noise[2] = {0,0};
-                cudaMemcpy(noise, d_data_duo, 3 * sizeof(float), cudaMemcpyDeviceToHost);
+                cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
 
                 printf("noise: %.3e\n\n", noise[0]);
 
@@ -864,7 +863,6 @@ __global__ void g_filter_boxcar_Z_flt(float *data, const size_t width, const siz
             *(s_data_BZ_flt + i) = *(s_data_BZ_flt + radius + depth + i) = *(s_data_BZ_flt + 2 * radius + 2 * depth + i) = 0.0f;
         }
     }
-    __syncthreads();
 
     for (int y = 0; y < height; ++y)
     {
@@ -1591,7 +1589,6 @@ __global__ void g_std_dev_val_flt(float *data, float *data_dst_duo, const size_t
 
         if((range == 0 && IS_NOT_NAN(*ptr)) || (range < 0 && *ptr < 0.0) || (range > 0 && *ptr > 0.0))
 		{
-            if (*s_data_sdf_start < 0.0f) {atomicAdd(data_dst_duo + 2, 1);}
 			*s_data_sdf_start += (*ptr - value) * (*ptr - value);
 			++*(s_data_sdf_start + 1);
 		}
