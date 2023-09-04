@@ -3942,11 +3942,11 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 	else                              rms = DataCube_stat_gauss(self, cadence, range);
 
 	//GPU_test_current();
-	GPU_test_sdt_dev((float*)self->data, self->data_size, cadence, range);
+	//GPU_test_sdt_dev((float*)self->data, self->data_size, cadence, range);
 	//GPU_test_median();
 	//GPU_test_Gauss_Y();
 	//GPU_test_Boxcar_Z();
-	printf("RMS: %.3e\n", rms);
+	//printf("RMS: %.3e\n", rms);
 	//exit(1);
 
 	if (useGPU)
