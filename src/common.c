@@ -45,7 +45,6 @@
 #include "common.h"
 
 
-
 /// @brief Terminate programme execution if condition is false
 ///
 /// If the specified condition is `false`, an error message will be
@@ -306,7 +305,6 @@ void timestamp(const time_t start, const clock_t start_clock)
 	printf("  CPU time:     %02lu:%02lu:%02lu h\33[0m\n\n", h_clock, m_clock, s_clock);
 	return;
 }
-
 
 
 /// @brief Wrapper around `malloc()` and `calloc()`

@@ -503,6 +503,8 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
 
                 printf("[%.1f] x [%lu]\n", Array_dbl_get(kernels_spat, i), Array_siz_get(kernels_spec, j));
 
+                printf("Gauss: %lu, Boxcar: %lu\n", radius_gauss, radius_boxcar);
+
                 // Copy maskScaled data from d_data to d_data_box and replace blanks
                 if (maskScaleXY >= 0.0)
                 {
@@ -573,9 +575,6 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
 
                 float noise[2] = {0,0};
                 cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
-
-                printf("noise: %.3e\n", noise[0]);
-                printf("Count: %.3e\n", noise[1]);
 
                 g_std_dev_val_flt_final_step<<<1,1>>>(d_data_duo);
                 cudaDeviceSynchronize();
@@ -899,6 +898,64 @@ __global__ void g_filter_boxcar_Z_flt(float *data, const size_t width, const siz
     }
 }
 
+__global__ void g_filter_XYZ_flt(float *data, const size_t width, const size_t height, const size_t depth, const size_t copy_depth, const size_t radius_g, const size_t radius_b, const size_t n_iter)
+{
+    size_t x = blockIdx.x * gridDim.x + threadIdx.x;
+    size_t y = blockIdx.y * gridDim.y + threadIdx.y;
+    size_t z = 0;
+    size_t local_index = threadIdx.y * blockDim.x + threadIdx.x;
+    size_t index = y * width + x;
+    size_t warpID = local_index / 32;
+
+    extern __shared__ float s_data_XYZ_flt[];
+    float *s_data_src = s_data_XYZ_flt;
+    float *s_data_dst = s_data_src + blockDim.x * blockDim.y * copy_depth;
+
+    if (x < width && y < height) 
+    {
+        for (int i = copy_depth; i--;){ s_data_dst[local_index + i * blockDim.x * blockDim.y] = s_data_src[local_index + i * blockDim.x * blockDim.y] = data[index + i * width * height];}
+    }
+
+    x = blockIdx.x * gridDim.x + threadIdx.y;
+    y = blockIdx.y * gridDim.y + threadIdx.x;
+    local_index = threadIdx.x * blockDim.x + threadIdx.y;
+
+    // Handle X direction
+    while(z < copy_depth)
+    {
+        for (int k = n_iter; k--;)
+        {
+            if (warpID < radius_g)
+            {
+                for (int i = warpID + 1; --i;){ s_data_dst[local_index + z * blockDim.x * blockDim.y] += s_data_src[local_index + z * blockDim.x * blockDim.y - i];}    // left side of value
+                for (int i = radius_g + 1; --i;) {s_data_dst[local_index + z * blockDim.x * blockDim.y] += s_data_src[local_index + z * blockDim.x * blockDim.y + i];}  // right side of value
+            }
+            else if (warpID > blockDim.x - radius_g - 1)
+            {
+                for (int i = blockDim.x - warpID; --i;){ s_data_dst[local_index + z * blockDim.x * blockDim.y] += s_data_src[local_index + z * blockDim.x * blockDim.y + i];}   // right side of value
+                for (int i = radius_g + 1; --i;) {s_data_dst[local_index + z * blockDim.x * blockDim.y] += s_data_src[local_index + z * blockDim.x * blockDim.y - i];}          // left side of value
+            }
+            else 
+            {
+                for (int i = radius_g + 1; --i;) {s_data_dst[local_index + z * blockDim.x * blockDim.y] += s_data_src[local_index + z * blockDim.x * blockDim.y + i] + s_data_src[local_index + z * blockDim.x * blockDim.y - i];}
+            }
+            s_data_dst[local_index + z * blockDim.x * blockDim.y] /= 2 * radius_g + 1;
+        }
+    }
+
+    // Handle X direction
+    for (int i = n_iter; i--;)
+    {
+
+    }
+
+
+    // Handle Y Direction
+
+    // Handle Z Direction
+    
+}
+
 __global__ void g_Mask8(float *data_box, char *maskData8, const size_t width, const size_t height, const size_t depth, const double threshold, float *rms_smooth, const int8_t value)
 {
     size_t x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -911,6 +968,66 @@ __global__ void g_Mask8(float *data_box, char *maskData8, const size_t width, co
     while (index < width * height * depth)
     {
         if (fabs(data_box[index]) > threshold * (*rms_smooth)) {maskData8[index] = (char)1;}
+        index += width * height;
+    }
+}
+
+__global__ void g_Mask1(float *data_box, char *maskData1, const size_t width, const size_t height, const size_t depth, const double threshold, float *rms_smooth, const int8_t value)
+{
+    size_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t y = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t maskIndex = x + y * (int)ceil(width / 8.0f);
+    size_t index = 8 * x + y * width;
+
+    if (x * 8 >= width || y >= height) {return;}
+
+    u_int8_t result = 0;
+
+    extern __shared__ float s_data_m1_flt[];
+    float *s_data_start = s_data_m1_flt + x * 8 + y * blockDim.x * 8;
+
+    while (index < width * height * depth)
+    {
+        if (x * 8 + 7 >= width)
+        {
+            int i = 0;
+            while (x * 8 + i < width)
+            {
+                s_data_start[i] = data_box[index + i];
+                i++;
+            }
+            while (i < 8)
+            {
+                s_data_start[i] = 0;
+                i++;
+            }
+        }
+        else
+        {
+            s_data_start[0] = data_box[index + 0];
+            s_data_start[1] = data_box[index + 1];
+            s_data_start[2] = data_box[index + 2];
+            s_data_start[3] = data_box[index + 3];
+            s_data_start[4] = data_box[index + 4];
+            s_data_start[5] = data_box[index + 5];
+            s_data_start[6] = data_box[index + 6];
+            s_data_start[7] = data_box[index + 7];
+        }
+
+        result = maskData1[maskIndex];
+
+        result |= (fabs(s_data_start[0]) > threshold * (*rms_smooth)) << 7;
+        result |= (fabs(s_data_start[1]) > threshold * (*rms_smooth)) << 6;
+        result |= (fabs(s_data_start[2]) > threshold * (*rms_smooth)) << 5;
+        result |= (fabs(s_data_start[3]) > threshold * (*rms_smooth)) << 4;
+        result |= (fabs(s_data_start[4]) > threshold * (*rms_smooth)) << 3;
+        result |= (fabs(s_data_start[5]) > threshold * (*rms_smooth)) << 2;
+        result |= (fabs(s_data_start[6]) > threshold * (*rms_smooth)) << 1;
+        result |= (fabs(s_data_start[7]) > threshold * (*rms_smooth)) << 0;
+
+        maskData1[maskIndex] = (char)result;
+
+        maskIndex += (int)ceil(width / 8.0f) * height;
         index += width * height;
     }
 }

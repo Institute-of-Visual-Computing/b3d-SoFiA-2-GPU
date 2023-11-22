@@ -143,4 +143,5 @@ void write_eps_footer(FILE *fp);
 bool is_little_endian(void);
 void swap_byte_order(char *word, const size_t size);
 
+
 #endif

@@ -3951,7 +3951,9 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 
 	if (useGPU)
 	{
+		// 
 		GPU_DataCube_filter_flt(self->data, maskCube->data, self->data_size, self->axis_size, kernels_spat, kernels_spec, maskScaleXY, rms, cadence, range, threshold);
+		//
 	}
 	else
 	{
@@ -4029,6 +4031,9 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 			}
 		}
 	}
+	
+
+	
 	return;
 }
 
