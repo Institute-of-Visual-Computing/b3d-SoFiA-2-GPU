@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <cuda_runtime.h>
 #include <cooperative_groups.h>
+#include <stdint.h>
 
 #include "common.h"
 #include "stddef.h"
@@ -29,6 +30,8 @@ void GPU_test_sdt_dev(float *data, size_t size, size_t cadence, const int range)
 void GPU_test_median();
 
 void GPU_test_copy_originalMask();
+
+void GPU_test_flag_sources();
 
 void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const double rms, const size_t cadence, const int range, const double threshold);
 
@@ -61,6 +64,8 @@ __global__ void g_filter_XYZ_flt(float *data, const size_t width, const size_t h
 __global__ void g_Mask8(float *data_box, char *maskData8, const size_t width, const size_t height, const size_t depth, const double threshold, float *rms_smooth, const int8_t value);
 
 __global__ void g_Mask1(float *data_box, char *maskData1, const size_t width, const size_t height, const size_t depth, const double threshold, float *rms_smooth, const int8_t value);
+
+__global__ void g_FlagSources(float *mask32, uint32_t *bbCounter, uint32_t *bbPtr, const size_t width, const size_t height, const size_t depth, const size_t radius_x, const size_t radius_y, const size_t radius_z);
 
 
 void GPU_DataCube_filter(char *data, char *originalData, int word_size, size_t data_size, size_t *axis_size, size_t radiusGauss, size_t n_iter, size_t radiusBoxcar); 

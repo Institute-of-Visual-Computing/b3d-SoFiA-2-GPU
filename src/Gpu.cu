@@ -324,6 +324,100 @@ void GPU_test_median()
 	printf("\n");
 }
 
+void GPU_test_flag_sources()
+{
+    float mask32[27] = {
+                        -1, 0, -1,
+                        -1, 0, 0,
+                        0, -1, -1,
+                    
+                        -1, -1, -1,
+                        0, -1, -1,
+                        0, 0, 0,
+                    
+                        -1, 0, -1,
+                        0, -1, 0,
+                        0, -1, -1
+                        };
+
+    for (int i = 0; i < 27; i++)
+    {
+        printf("%f ", mask32[i]);
+        if (i % 3 == 2) {printf("\n");}
+        if (i % 9 == 8){printf("\n");}
+    }
+    printf("\n");
+
+    float *d_mask32;
+    uint32_t *d_BBs;
+    uint32_t *d_BBcounter;
+
+    cudaError_t err;
+
+    printf("Started GPU\n");
+    
+    cudaMalloc((void**)&d_mask32, 27 * sizeof(float));
+    cudaMalloc((void**)&d_BBs, 30 * 3 * sizeof(uint32_t));
+    cudaMalloc((void**)&d_BBcounter, sizeof(uint32_t));
+
+    if ((err = cudaGetLastError()) != cudaSuccess)
+    {
+        printf("Cuda error after Malloc: %s\n", cudaGetErrorString(err));
+        exit(1);
+    }
+
+    cudaMemcpy(d_mask32, mask32, 27 * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemset(d_BBs, NULL, 30 * 3 * sizeof(uint32_t));
+    cudaMemset(d_BBcounter, static_cast<int>(1), sizeof(uint32_t));
+    cudaDeviceSynchronize();
+
+    if ((err = cudaGetLastError()) != cudaSuccess)
+    {
+        printf("Cuda error after Memset: %s\n", cudaGetErrorString(err));
+        exit(1);
+    }
+
+    dim3 blockSize(3,3);
+    dim3 gridSize(1,1);
+
+    g_FlagSources<<<gridSize, blockSize>>>(d_mask32, d_BBcounter, d_BBs, 3, 3, 3, 1, 1, 1);
+    cudaDeviceSynchronize();
+
+    if ((err = cudaGetLastError()) != cudaSuccess)
+    {
+        printf("Cuda error after Kernel: %s\n", cudaGetErrorString(err));
+        exit(1);
+    }
+
+    cudaMemcpy(mask32, d_mask32, 27 * sizeof(float), cudaMemcpyDeviceToHost);
+
+    if ((err = cudaGetLastError()) != cudaSuccess)
+    {
+        printf("Cuda error after back copy: %s\n", cudaGetErrorString(err));
+        exit(1);
+    }
+
+    for (int i = 0; i < 27; i++)
+    {
+        printf("%f ", mask32[i]);
+        if (i % 3 == 2) {printf("\n");}
+        if (i % 9 == 8){printf("\n");}
+    }
+    printf("\n");
+    
+    cudaFree(d_mask32);
+    cudaFree(d_BBs);
+    cudaFree(d_BBcounter);
+
+    if ((err = cudaGetLastError()) != cudaSuccess)
+    {
+        printf("Cuda error: %s\n", cudaGetErrorString(err));
+        exit(1);
+    }
+
+    printf("Finished GPU\n");
+}
+
 void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const double rms, const size_t cadence, const int range, const double threshold)
 {
     printf("Starting GPU\n");
@@ -1028,6 +1122,57 @@ __global__ void g_Mask1(float *data_box, char *maskData1, const size_t width, co
         maskData1[maskIndex] = (char)result;
 
         maskIndex += (int)ceil(width / 8.0f) * height;
+        index += width * height;
+    }
+}
+
+__global__ void g_FlagSources(float *mask32, uint32_t *bbCounter, uint32_t *bbPtr, const size_t width, const size_t height, const size_t depth, const size_t radius_x, const size_t radius_y, const size_t radius_z)
+{
+    size_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t y = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t z = 0;
+
+    if (x >= width ||  y >= height) { return; }
+
+    size_t index = x + y * width;
+    size_t localindex = x + y * blockDim.x;
+    size_t maxIndex = width * height * depth;
+    float data;
+    uint32_t startIndex = NULL;
+    uint32_t endIndex;
+    uint32_t emptyCounter = 0;
+    uint32_t lable;
+
+    while (index < maxIndex)
+    {
+        data = mask32[index];
+
+        if (data < 0 && startIndex == NULL)
+        {
+            lable = atomicAdd(bbCounter, 1);
+            mask32[index] = lable;
+            startIndex = index;
+            endIndex = index;
+            emptyCounter = 0;
+        }
+        else if (data < 0)
+        {
+            mask32[index] = lable;
+            endIndex = index;
+            emptyCounter = 0;
+        }
+        else if (++emptyCounter >= radius_z)
+        {
+            //bbPtr[(lable) * 3] = startIndex;
+            //bbPtr[(lable) * 3 + 1] = endIndex;
+            //bbPtr[(lable) * 3 + 2] = NULL;
+            startIndex = NULL;
+            emptyCounter = 0;
+        }
+        else
+        {
+            ++emptyCounter;
+        }
         index += width * height;
     }
 }

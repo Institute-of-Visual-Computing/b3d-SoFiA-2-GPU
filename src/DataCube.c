@@ -3912,6 +3912,9 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 {
 	bool useGPU = true;
 
+	GPU_test_flag_sources();
+	exit(0);
+
 	// Sanity checks
 	check_null(self);
 	check_null(self->data);
@@ -4148,6 +4151,10 @@ PUBLIC void DataCube_run_threshold(const DataCube *self, DataCube *maskCube, con
 
 PUBLIC LinkerPar *DataCube_run_linker(const DataCube *self, DataCube *mask, const size_t radius_x, const size_t radius_y, const size_t radius_z, const size_t min_size_x, const size_t min_size_y, const size_t min_size_z, const size_t min_npix, const double min_fill, const size_t max_size_x, const size_t max_size_y, const size_t max_size_z, const size_t max_npix, const double max_fill, const bool pos_pix, const bool pos_src, const double rms)
 {
+	printf("Radius X: %lu\n", radius_x);
+	printf("Radius Y: %lu\n", radius_y);
+	printf("Radius Z: %lu\n", radius_z);
+
 	// Sanity checks
 	check_null(self);
 	check_null(self->data);
