@@ -21,9 +21,9 @@ You may want to first check if wcslib is either already installed or available f
 
 ## Installation
 
-Once all prerequisites are installed and available, simply enter the SoFiA 2 base directory and execute the `compile.sh` script to compile SoFiA 2 using the GCC compiler:
+Once all prerequisites are installed and available, simply enter the SoFiA 2 base directory and execute the `compile_with_nvcc.sh` script to compile SoFiA 2 using the GCC compiler:
 
-`./compile.sh -fopenmp`
+`./compile_with_nvcc.sh -fopenmp`
 
 Note that the `-fopenmp` parameter is optional and will enable **multi-threading** using OpenMP. If your compiler does not support OpenMP, this parameter can simply be omitted to install a single-threaded version of SoFiA 2. Please ensure that you read and follow the **instructions** printed at the end of the compilation process to finalise the installation. If a compiler error related to WCSLIB shows up, please ensure that WCSLIB is installed in a standard location where it can be found by the GCC. Then run the compilation script again to see if the error message has disappeared. If for some reason you don’t have permission to execute the compilation script, try running the command `chmod 764 compile.sh` first to set the correct file permissions.
 
