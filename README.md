@@ -13,7 +13,7 @@ The following software is required before SoFiA 2 can be installed:
 * **Linux** or **Unix** operating system (e.g. Ubuntu, Mac OS, etc.)
 * **GNU C compiler** (gcc) version 4 or higher (https://gcc.gnu.org/)
 * **wcslib** version 7 or higher (https://www.atnf.csiro.au/people/mcalabre/WCS/)
-* * **cuda** version 12.1 or higher (https://developer.nvidia.com/cuda-downloads)
+* **cuda** version 12.1 or higher (https://developer.nvidia.com/cuda-downloads)
 
 Both gcc and wcslib are freely available under the GNU General Public Licence. Note that earlier versions of gcc or wcslib might work as well, but this has not been tested. In principle, other compilers that are compatible with gcc and support the C99 standard might also work, e.g. Apple’s clang compiler or the Intel C compiler, possibly with some minor tweaking of the installation script.
 
