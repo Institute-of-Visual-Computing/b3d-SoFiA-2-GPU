@@ -200,7 +200,7 @@ void GPU_test_Boxcar_Z()
     dim3 blockSize(1,1,2);
     dim3 gridSize(5,1);
 
-    g_filter_boxcar_Z_flt<<<gridSize, blockSize, 7 * sizeof(float)>>>(d_data, 5, 1, 2, 1);
+    g_filter_boxcar_Z_flt_new<<<gridSize, blockSize, 5 * 3 * sizeof(float)>>>(d_data, 1, 1, 10, 1);
 
     cudaDeviceSynchronize();
 
@@ -328,17 +328,19 @@ void GPU_test_flag_sources()
 {
     float mask32[27] = {
                         -1, 0, -1,
-                        -1, 0, 0,
+                        -1, 0, -1,
                         0, -1, -1,
                     
-                        -1, -1, -1,
+                        -1, -1, 0,
                         0, -1, -1,
                         0, 0, 0,
                     
                         -1, 0, -1,
-                        0, -1, 0,
+                        0, -1, -1,
                         0, -1, -1
                         };
+
+    u_int32_t sources[30];
 
     for (int i = 0; i < 27; i++)
     {
@@ -367,8 +369,8 @@ void GPU_test_flag_sources()
     }
 
     cudaMemcpy(d_mask32, mask32, 27 * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemset(d_BBs, NULL, 30 * 3 * sizeof(uint32_t));
-    cudaMemset(d_BBcounter, static_cast<int>(1), sizeof(uint32_t));
+    cudaMemset(d_BBs, 0, 30 * 3 * sizeof(uint32_t));
+    cudaMemset(d_BBcounter, 0, sizeof(uint32_t));
     cudaDeviceSynchronize();
 
     if ((err = cudaGetLastError()) != cudaSuccess)
@@ -380,16 +382,26 @@ void GPU_test_flag_sources()
     dim3 blockSize(3,3);
     dim3 gridSize(1,1);
 
-    g_FlagSources<<<gridSize, blockSize>>>(d_mask32, d_BBcounter, d_BBs, 3, 3, 3, 1, 1, 1);
+    g_FlagSources<<<gridSize, blockSize>>>(d_mask32, d_BBcounter, d_BBs, 3, 3, 3, 1);
     cudaDeviceSynchronize();
 
     if ((err = cudaGetLastError()) != cudaSuccess)
     {
-        printf("Cuda error after Kernel: %s\n", cudaGetErrorString(err));
+        printf("Cuda error after Flagging: %s\n", cudaGetErrorString(err));
+        exit(1);
+    }
+
+    g_MergeSourcesFirstPass<<<gridSize, blockSize>>>(d_mask32, d_BBs, 3, 3, 3, 1, 1, 1);
+    cudaDeviceSynchronize();
+
+    if ((err = cudaGetLastError()) != cudaSuccess)
+    {
+        printf("Cuda error after Merging: %s\n", cudaGetErrorString(err));
         exit(1);
     }
 
     cudaMemcpy(mask32, d_mask32, 27 * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(sources, d_BBs, 30 * sizeof(u_int32_t), cudaMemcpyDeviceToHost);
 
     if ((err = cudaGetLastError()) != cudaSuccess)
     {
@@ -404,6 +416,11 @@ void GPU_test_flag_sources()
         if (i % 9 == 8){printf("\n");}
     }
     printf("\n");
+
+    for (int i = 0; i < 30; i+=3)
+    {
+        printf("%lu, %lu, %lu\n", sources[i], sources[i + 1], sources[i + 2]);
+    }
     
     cudaFree(d_mask32);
     cudaFree(d_BBs);
@@ -651,7 +668,8 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 {
                     printf("Launching Boxcar Z…\n");
 
-                    g_filter_boxcar_Z_flt<<<gridSizeZ, blockSizeZ, (radius_boxcar * 3 + depth * 2) * sizeof(float)>>>(d_data_box, width, height, depth, radius_boxcar);
+                    g_filter_boxcar_Z_flt_new<<<gridSizeMS, blockSizeMS, (2 * radius_boxcar + 1) * blockSizeMS.x * blockSizeMS.y * sizeof(float)>>>(d_data_box, width, height, depth, radius_boxcar);
+                    //g_filter_boxcar_Z_flt<<<gridSizeZ, blockSizeZ, (radius_boxcar * 3 + depth * 2) * sizeof(float)>>>(d_data_box, width, height, depth, radius_boxcar);
                     cudaDeviceSynchronize();
 
                     err = cudaGetLastError();
@@ -992,6 +1010,46 @@ __global__ void g_filter_boxcar_Z_flt(float *data, const size_t width, const siz
     }
 }
 
+__global__ void g_filter_boxcar_Z_flt_new(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius)
+{
+    size_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    int filter_size = (2 * radius + 1);
+    float value = 0.0f;
+    const float invers = 1.0f / filter_size;
+    extern __shared__ float s_data_BZ_flt_new[];
+    float *s_data_start = s_data_BZ_flt_new + (threadIdx.x + threadIdx.y * blockDim.x) * filter_size;
+    int ptr = 0;    
+
+    if (x < width && y < height)
+    {
+        for (int z = depth; z--;)
+        {
+            if (z < depth - filter_size)
+            {
+                //value -= data[x + y * width + (z + filter_size) * width * height];
+                value -= s_data_start[ptr];
+            }
+
+            value += s_data_start[ptr++] = data[x + y * width + z * width * height];
+            ptr = ptr % filter_size;
+
+            if (z < depth - radius)
+            {
+                data[x + y * width + (z + radius) * width * height] = value * invers;
+            }
+        }
+        for (int z = radius; z--;)
+        {
+            //value -= data[x + y * width + (z + radius + 1) * width * height];
+            value -= s_data_start[ptr++];
+            ptr = ptr % filter_size;
+            data[x + y * width + z * width * height] = value * invers;
+        }
+    }
+}
+
 __global__ void g_filter_XYZ_flt(float *data, const size_t width, const size_t height, const size_t depth, const size_t copy_depth, const size_t radius_g, const size_t radius_b, const size_t n_iter)
 {
     size_t x = blockIdx.x * gridDim.x + threadIdx.x;
@@ -1126,7 +1184,7 @@ __global__ void g_Mask1(float *data_box, char *maskData1, const size_t width, co
     }
 }
 
-__global__ void g_FlagSources(float *mask32, uint32_t *bbCounter, uint32_t *bbPtr, const size_t width, const size_t height, const size_t depth, const size_t radius_x, const size_t radius_y, const size_t radius_z)
+__global__ void g_FlagSources(float *mask32, uint32_t *bbCounter, uint32_t *bbPtr, const size_t width, const size_t height, const size_t depth, const size_t radius_z)
 {
     size_t x = blockIdx.x * blockDim.x + threadIdx.x;
     size_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -1135,25 +1193,26 @@ __global__ void g_FlagSources(float *mask32, uint32_t *bbCounter, uint32_t *bbPt
     if (x >= width ||  y >= height) { return; }
 
     size_t index = x + y * width;
-    size_t localindex = x + y * blockDim.x;
     size_t maxIndex = width * height * depth;
     float data;
-    uint32_t startIndex = NULL;
+    uint32_t startIndex;
     uint32_t endIndex;
     uint32_t emptyCounter = 0;
     uint32_t lable;
+    bool inSource = false;
 
     while (index < maxIndex)
     {
         data = mask32[index];
 
-        if (data < 0 && startIndex == NULL)
+        if (data < 0 && !inSource)
         {
-            lable = atomicAdd(bbCounter, 1);
+            lable = atomicAdd(bbCounter, 1) + 1;
             mask32[index] = lable;
             startIndex = index;
             endIndex = index;
             emptyCounter = 0;
+            inSource = true;
         }
         else if (data < 0)
         {
@@ -1161,12 +1220,12 @@ __global__ void g_FlagSources(float *mask32, uint32_t *bbCounter, uint32_t *bbPt
             endIndex = index;
             emptyCounter = 0;
         }
-        else if (++emptyCounter >= radius_z)
+        else if (++emptyCounter >= radius_z && inSource)
         {
-            //bbPtr[(lable) * 3] = startIndex;
-            //bbPtr[(lable) * 3 + 1] = endIndex;
-            //bbPtr[(lable) * 3 + 2] = NULL;
-            startIndex = NULL;
+            bbPtr[(lable - 1) * 3] = startIndex;
+            bbPtr[(lable - 1) * 3 + 1] = endIndex;
+            bbPtr[(lable - 1) * 3 + 2] = (u_int32_t)0;
+            inSource = false;
             emptyCounter = 0;
         }
         else
@@ -1174,6 +1233,121 @@ __global__ void g_FlagSources(float *mask32, uint32_t *bbCounter, uint32_t *bbPt
             ++emptyCounter;
         }
         index += width * height;
+        __syncthreads();
+    }
+
+    if (inSource)
+    {
+        bbPtr[(lable - 1) * 3] = startIndex;
+        bbPtr[(lable - 1) * 3 + 1] = endIndex;
+        bbPtr[(lable - 1) * 3 + 2] = (u_int32_t)0;
+        inSource = false;
+        emptyCounter = 0;
+    }
+}
+
+__global__ void g_MergeSourcesFirstPass(float *mask32, uint32_t *bbPtr, const size_t width, const size_t height, const size_t depth, const size_t radius_x, const size_t radius_y, const size_t radius_z)
+{
+    size_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t y = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t z = 0;
+
+	const size_t radius_x_squ   = radius_x * radius_x;
+	const size_t radius_y_squ   = radius_y * radius_y;
+	const size_t radius_z_squ   = radius_z * radius_z;
+	const size_t radius_xy_squ  = radius_x_squ * radius_y_squ;
+	const size_t radius_xz_squ  = radius_x_squ * radius_z_squ;
+	const size_t radius_yz_squ  = radius_y_squ * radius_z_squ;
+	const size_t radius_xyz_squ = radius_x_squ * radius_yz_squ;
+
+    if (x >= width ||  y >= height) { return; }
+
+    size_t index;
+
+    uint32_t lable;
+    uint32_t mergeLable;
+
+    while (z < depth)
+    {
+        index = x + y * width + z * width * height;
+        lable = mask32[index];
+
+        if (lable > 0)
+        {
+            mergeLable = bbPtr[(lable - 1) * 3 + 2] > 0 ? bbPtr[(lable - 1) * 3 + 2] : lable;
+            const size_t x1 = (x > radius_x) ? (x - radius_x) : 0;
+            const size_t y1 = (y > radius_y) ? (y - radius_y) : 0;
+            const size_t z1 = (z > radius_z) ? (z - radius_z) : 0;
+            const size_t x2 = (x + radius_x + 1 < width) ? (x + radius_x) : (width - 1);
+            const size_t y2 = (y + radius_y + 1 < height) ? (y + radius_y) : (height - 1);
+            const size_t z2 = (z + radius_z + 1 < depth) ? (z + radius_z) : (depth - 1);
+
+            // Loop over entire bounding box
+            for(size_t zz = z1; zz <= z2; ++zz)
+            {
+                const size_t dz_squ = zz > z ? (zz - z) * (zz - z) * radius_xy_squ : (z - zz) * (z - zz) * radius_xy_squ;
+                
+                for(size_t yy = y1; yy <= y2; ++yy)
+                {
+                    const size_t dy_squ = yy > y ? (yy - y) * (yy - y) * radius_xz_squ : (y - yy) * (y - yy) * radius_xz_squ;
+                    
+                    for(size_t xx = x1; xx <= x2; ++xx)
+                    {
+                        const size_t dx_squ = xx > x ? (xx - x) * (xx - x) * radius_yz_squ : (x - xx) * (x - xx) * radius_yz_squ;
+                        
+                        // Check merging radius, assuming ellipsoid (with dx^2 / rx^2 + dy^2 / ry^2 + dz^2 / rz^2 = 1)
+                        if(dx_squ + dy_squ + dz_squ > radius_xyz_squ) continue;
+
+                        uint32_t otherLable = mask32[xx + yy * width + zz * width * height];
+
+                        if (otherLable > 0 && otherLable < mergeLable)
+                        {
+                            mergeLable = otherLable;
+                        }
+                    }
+                }
+            }
+
+            bbPtr[(lable - 1) * 3 + 2] = mergeLable;
+            //__syncthreads();
+            uint32_t oldMergeLable = mergeLable;
+
+            for(size_t zz = z1; zz <= z2; ++zz)
+            {
+                const size_t dz_squ = zz > z ? (zz - z) * (zz - z) * radius_xy_squ : (z - zz) * (z - zz) * radius_xy_squ;
+                
+                for(size_t yy = y1; yy <= y2; ++yy)
+                {
+                    const size_t dy_squ = yy > y ? (yy - y) * (yy - y) * radius_xz_squ : (y - yy) * (y - yy) * radius_xz_squ;
+                    
+                    for(size_t xx = x1; xx <= x2; ++xx)
+                    {
+                        const size_t dx_squ = xx > x ? (xx - x) * (xx - x) * radius_yz_squ : (x - xx) * (x - xx) * radius_yz_squ;
+                        
+                        // Check merging radius, assuming ellipsoid (with dx^2 / rx^2 + dy^2 / ry^2 + dz^2 / rz^2 = 1)
+                        if(dx_squ + dy_squ + dz_squ > radius_xyz_squ) continue;
+
+                        uint32_t otherLable = mask32[xx + yy * width + zz * width * height];
+                        uint32_t otherMergeLable = otherLable ? bbPtr[(otherLable - 1) * 3 + 2] : 0;
+
+                        if (otherLable > 0 && otherMergeLable < mergeLable)
+                        {
+                            mergeLable = otherMergeLable;
+                        }
+                    }
+                }
+            }
+
+            if (mergeLable < oldMergeLable)
+            {
+                bbPtr[(lable - 1) * 3 + 2] = mergeLable;
+                atomicMin(bbPtr + ((oldMergeLable - 1) * 3 + 2), mergeLable);
+            }
+
+            //__syncthreads();
+        }
+        z++;
+        __syncthreads();
     }
 }
 

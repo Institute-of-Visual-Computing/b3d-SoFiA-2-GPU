@@ -3912,8 +3912,8 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 {
 	bool useGPU = true;
 
-	GPU_test_flag_sources();
-	exit(0);
+	// GPU_test_Boxcar_Z();
+	// exit(0);
 
 	// Sanity checks
 	check_null(self);
