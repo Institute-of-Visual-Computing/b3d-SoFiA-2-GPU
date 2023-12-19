@@ -52,9 +52,13 @@ __global__ void g_maskScale_remove_blanks_flt(float *data, char *mask, const siz
 // It is assumed, that the width of the cube is not larger than 12000 entries
 __global__ void g_filter_gauss_X_flt(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius, const size_t n_iter);
 
+__global__ void g_filter_gauss_X_flt_new(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius, const size_t n_iter);
+
 // Kernel to apply gaussian filter in y direction. Must be launched in column-wise blocks (so one block per column)
 // It is assumed, that the height of the cube is not larger than 12000 entries
 __global__ void g_filter_gauss_Y_flt(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius, const size_t n_iter);
+
+__global__ void g_filter_gauss_Y_flt_new(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius, const size_t n_iter);
 
 __global__ void g_filter_boxcar_Z_flt(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius);
 

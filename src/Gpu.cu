@@ -81,10 +81,10 @@ void GPU_test_Gauss_X()
 
     cudaDeviceSynchronize();
 
-    dim3 blockSize(8,1);
-    dim3 gridSize(1,2);
+    dim3 blockSize(32,32);
+    dim3 gridSize(1,1);
 
-    g_filter_gauss_X_flt<<<gridSize, blockSize, 29 * sizeof(float)>>>(d_data, 5, 1, 2, 1, 5);
+    g_filter_gauss_X_flt_new<<<gridSize, blockSize, 1000 * sizeof(float)>>>(d_data, 10, 1, 1, 1, 1);
 
     cudaDeviceSynchronize();
 
@@ -473,15 +473,15 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     char *d_mask_data;
     char *d_original_mask;
 
-    size_t free_bytes, total_bytes;
-    cudaError_t cuda_status = cudaMemGetInfo(&free_bytes, &total_bytes);
+    // size_t free_bytes, total_bytes;
+    // cudaError_t cuda_status = cudaMemGetInfo(&free_bytes, &total_bytes);
 
-    if (cuda_status == cudaSuccess) {
-        printf("Total GPU Memory: %fMB\n", total_bytes / (1024.0f * 1024.0f));
-        printf("Free GPU Memory: %fMB\n", free_bytes / (1024.0f * 1024.0f));
-    } else {
-        printf("cudaMemGetInfo failed: %s\n", cudaGetErrorString(cuda_status));
-    }
+    // if (cuda_status == cudaSuccess) {
+    //     printf("Total GPU Memory: %fMB\n", total_bytes / (1024.0f * 1024.0f));
+    //     printf("Free GPU Memory: %fMB\n", free_bytes / (1024.0f * 1024.0f));
+    // } else {
+    //     printf("cudaMemGetInfo failed: %s\n", cudaGetErrorString(cuda_status));
+    // }
 
     // Allocate and copy values from Host to Device
     printf("Allocating %fMB for the data\n", data_size * sizeof(float) / (1024.0f * 1024.0f));
@@ -494,14 +494,14 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
         exit(1);
     }
 
-    cuda_status = cudaMemGetInfo(&free_bytes, &total_bytes);
+    // cuda_status = cudaMemGetInfo(&free_bytes, &total_bytes);
 
-    if (cuda_status == cudaSuccess) {
-        printf("Total GPU Memory: %fMB\n", total_bytes / (1024.0f * 1024.0f));
-        printf("Free GPU Memory: %fMB\n", free_bytes / (1024.0f * 1024.0f));
-    } else {
-        printf("cudaMemGetInfo failed: %s\n", cudaGetErrorString(cuda_status));
-    }
+    // if (cuda_status == cudaSuccess) {
+    //     printf("Total GPU Memory: %fMB\n", total_bytes / (1024.0f * 1024.0f));
+    //     printf("Free GPU Memory: %fMB\n", free_bytes / (1024.0f * 1024.0f));
+    // } else {
+    //     printf("cudaMemGetInfo failed: %s\n", cudaGetErrorString(cuda_status));
+    // }
 
     printf("Allocating %fMB for the box\n", data_size * sizeof(float) / (1024.0f * 1024.0f));
     cudaMalloc((void**)&d_data_box, data_size * sizeof(float));
@@ -513,14 +513,14 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
         exit(1);
     }
 
-    cuda_status = cudaMemGetInfo(&free_bytes, &total_bytes);
+    // cuda_status = cudaMemGetInfo(&free_bytes, &total_bytes);
 
-    if (cuda_status == cudaSuccess) {
-        printf("Total GPU Memory: %fMB\n", total_bytes / (1024.0f * 1024.0f));
-        printf("Free GPU Memory: %fMB\n", free_bytes / (1024.0f * 1024.0f));
-    } else {
-        printf("cudaMemGetInfo failed: %s\n", cudaGetErrorString(cuda_status));
-    }
+    // if (cuda_status == cudaSuccess) {
+    //     printf("Total GPU Memory: %fMB\n", total_bytes / (1024.0f * 1024.0f));
+    //     printf("Free GPU Memory: %fMB\n", free_bytes / (1024.0f * 1024.0f));
+    // } else {
+    //     printf("cudaMemGetInfo failed: %s\n", cudaGetErrorString(cuda_status));
+    // }
 
     printf("Allocating %fMB for the duo\n", 2 * sizeof(float) / (1024.0f * 1024.0f));
     cudaMalloc((void**)&d_data_duo, 2 * sizeof(float));
@@ -532,14 +532,14 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
         exit(1);
     }
 
-    cuda_status = cudaMemGetInfo(&free_bytes, &total_bytes);
+    // cuda_status = cudaMemGetInfo(&free_bytes, &total_bytes);
 
-    if (cuda_status == cudaSuccess) {
-        printf("Total GPU Memory: %fMB\n", total_bytes / (1024.0f * 1024.0f));
-        printf("Free GPU Memory: %fMB\n", free_bytes / (1024.0f * 1024.0f));
-    } else {
-        printf("cudaMemGetInfo failed: %s\n", cudaGetErrorString(cuda_status));
-    }
+    // if (cuda_status == cudaSuccess) {
+    //     printf("Total GPU Memory: %fMB\n", total_bytes / (1024.0f * 1024.0f));
+    //     printf("Free GPU Memory: %fMB\n", free_bytes / (1024.0f * 1024.0f));
+    // } else {
+    //     printf("cudaMemGetInfo failed: %s\n", cudaGetErrorString(cuda_status));
+    // }
 
     printf("Allocating %fMB for the mask\n", data_size * sizeof(char) / (1024.0f * 1024.0f));
     cudaMalloc((void**)&d_original_mask, data_size * sizeof(char));
@@ -551,18 +551,18 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
         exit(1);
     }
 
-    cuda_status = cudaMemGetInfo(&free_bytes, &total_bytes);
+    // cuda_status = cudaMemGetInfo(&free_bytes, &total_bytes);
 
-    if (cuda_status == cudaSuccess) {
-        printf("Total GPU Memory: %fMB\n", total_bytes / (1024.0f * 1024.0f));
-        printf("Free GPU Memory: %fMB\n", free_bytes / (1024.0f * 1024.0f));
-    } else {
-        printf("cudaMemGetInfo failed: %s\n", cudaGetErrorString(cuda_status));
-    }
+    // if (cuda_status == cudaSuccess) {
+    //     printf("Total GPU Memory: %fMB\n", total_bytes / (1024.0f * 1024.0f));
+    //     printf("Free GPU Memory: %fMB\n", free_bytes / (1024.0f * 1024.0f));
+    // } else {
+    //     printf("cudaMemGetInfo failed: %s\n", cudaGetErrorString(cuda_status));
+    // }
 
     cudaMemcpy(d_data, data, data_size * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_data_box, data, data_size * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_original_mask, maskdata, data_size * sizeof(char), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_data_box, d_data, data_size * sizeof(float), cudaMemcpyDeviceToDevice);
+    cudaMemset(d_original_mask, 0, data_size * sizeof(char));
 
     err = cudaGetLastError();
     if (err != cudaSuccess)
@@ -589,14 +589,16 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     dim3 gridSizeMS((width + blockSizeMS.x - 1) / blockSizeMS.x,
                     (height + blockSizeMS.y - 1) / blockSizeMS.y);
 
-    dim3 blockSizeX(1024,1);
-    dim3 gridSizeX(1,height);
+    dim3 blockSizeX(32,32);
+    dim3 gridSizeX(1,(height + 7) / 8);
 
-    dim3 blockSizeY(1,1024);
-    dim3 gridSizeY(width,1);
+    dim3 blockSizeY(32,32);
+    dim3 gridSizeY((width + 7) / 8,1);
 
-    dim3 blockSizeZ(1024,1);
-    dim3 gridSizeZ(width,1);
+    dim3 blockSizeZ(16,16);
+    dim3 gridSizeZ((width + blockSizeZ.x - 1) / blockSizeZ.x,
+                    (height + blockSizeZ.y - 1) / blockSizeZ.y);
+
 
     dim3 blockSizeNoise(1024);
     dim3 gridSizeNoise(1024);
@@ -622,7 +624,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                     printf("Starting Kernels\n");
 
                     g_copyData_setMaskedScale8_removeBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, d_original_mask, width, height, depth, maskScaleXY * rms);
-                    cudaDeviceSynchronize();
+                    //cudaDeviceSynchronize();
 
                     err = cudaGetLastError();
                     if (err != cudaSuccess)
@@ -633,15 +635,14 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 else
                 {
                     g_copyData_removeBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, width, height, depth);
-                    cudaDeviceSynchronize();
+                    //cudaDeviceSynchronize();
                 }
                 
                 if(radius_gauss > 0)
                 {
                     printf("Launching Gauss X…\n");
-
-                    g_filter_gauss_X_flt<<<gridSizeX, blockSizeX, (radius_gauss * 3 + width * 2) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
-                    cudaDeviceSynchronize();
+                    g_filter_gauss_X_flt_new<<<gridSizeX, blockSizeX, (16 * width + 17 * radius_gauss) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
+                    //cudaDeviceSynchronize();
 
                     err = cudaGetLastError();
                     if (err != cudaSuccess)
@@ -654,8 +655,8 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 {
                     printf("Launching Gauss Y…\n");
 
-                    g_filter_gauss_Y_flt<<<gridSizeY, blockSizeY, (radius_gauss * 3 + height * 2) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
-                    cudaDeviceSynchronize();
+                    g_filter_gauss_Y_flt_new<<<gridSizeY, blockSizeY, (16 * height + 24 * radius_gauss) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
+                    //cudaDeviceSynchronize();
 
                     err = cudaGetLastError();
                     if (err != cudaSuccess)
@@ -668,9 +669,8 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 {
                     printf("Launching Boxcar Z…\n");
 
-                    g_filter_boxcar_Z_flt_new<<<gridSizeMS, blockSizeMS, (2 * radius_boxcar + 1) * blockSizeMS.x * blockSizeMS.y * sizeof(float)>>>(d_data_box, width, height, depth, radius_boxcar);
-                    //g_filter_boxcar_Z_flt<<<gridSizeZ, blockSizeZ, (radius_boxcar * 3 + depth * 2) * sizeof(float)>>>(d_data_box, width, height, depth, radius_boxcar);
-                    cudaDeviceSynchronize();
+                    g_filter_boxcar_Z_flt_new<<<gridSizeZ, blockSizeZ, (2 * radius_boxcar + 1) * blockSizeZ.x * blockSizeZ.y * sizeof(float)>>>(d_data_box, width, height, depth, radius_boxcar);
+                    //cudaDeviceSynchronize();
 
                     err = cudaGetLastError();
                     if (err != cudaSuccess)
@@ -683,17 +683,17 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 g_addBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, width, height, depth);
 
                 g_std_dev_val_flt<<<gridSizeNoise, blockSizeNoise, 1024 * 2 * sizeof(float)>>>(d_data_box, d_data_duo, data_size, 0.0f, cadence, range);
-                cudaDeviceSynchronize();
+                //cudaDeviceSynchronize();
 
-                float noise[2] = {0,0};
-                cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
+                //float noise[2] = {0,0};
+                //cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
 
                 g_std_dev_val_flt_final_step<<<1,1>>>(d_data_duo);
-                cudaDeviceSynchronize();
+                //cudaDeviceSynchronize();
 
-                cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
+                //cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
 
-                printf("Final noise: %.3e\n\n", noise[0]);
+                //printf("Final noise: %.3e\n\n", noise[0]);
 
                 g_Mask8<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_original_mask, width, height, depth, threshold, d_data_duo, 1);
 
@@ -706,14 +706,14 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
             else
             {
                 g_std_dev_val_flt<<<gridSizeNoise, blockSizeNoise, 1024 * 2 * sizeof(float)>>>(d_data, d_data_duo, data_size, 0.0f, cadence, range);
-                cudaDeviceSynchronize();
+                //cudaDeviceSynchronize();
                 g_std_dev_val_flt_final_step<<<1,1>>>(d_data_duo);
-                cudaDeviceSynchronize();
+                //cudaDeviceSynchronize();
 
-                float noise[2] = {0,0};
-                cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
+                //float noise[2] = {0,0};
+                //cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
 
-                printf("noise: %.3e\n\n", noise[0]);
+                //printf("noise: %.3e\n\n", noise[0]);
 
                 g_Mask8<<<gridSizeMS, blockSizeMS>>>(d_data, d_original_mask, width, height, depth, threshold, d_data_duo, 1);
 
@@ -728,7 +728,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
 
     cudaMemcpy(maskdata, d_original_mask, data_size * sizeof(char), cudaMemcpyDeviceToHost);
 
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
 
     cudaFree(d_data);
     cudaFree(d_data_box);
@@ -900,6 +900,67 @@ __global__ void g_filter_gauss_X_flt(float *data, const size_t width, const size
     }
 }
 
+__global__ void g_filter_gauss_X_flt_new(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius, const size_t n_iter)
+{
+    const size_t localY = threadIdx.y / 4;
+    const size_t y = blockIdx.y * 8 + localY;
+    const size_t x0 = threadIdx.x + blockDim.x * (threadIdx.y % 4);
+    size_t x = x0;
+    size_t z = 0;
+
+    const size_t xPage = 4 * blockDim.x;
+
+    extern __shared__ float s_data_GY_flt_new[];
+    float *s_data_src = s_data_GY_flt_new + radius * (1 + localY) + width * localY;
+    float *s_data_dst = s_data_src + width * 8 + radius * 8;
+
+    if (x0 == 0)
+    {
+        for (int i = radius; i--;)
+        {
+            *(s_data_GY_flt_new + i) = *(s_data_src + width + i) = *(s_data_dst + width + i) = 0.0f;
+        }
+    }
+
+    while (z < depth)
+    {
+        while (y < height && x < width)
+        {
+            *(s_data_src + x) = data[x + y * width + z * width * height];
+            x += xPage;
+        }
+        x = x0;
+        __syncthreads();
+
+        for (int i = n_iter; i--;)
+        {
+            while (y < height && x < width)
+            {
+                *(s_data_dst + x) = *(s_data_src + x);
+                for (int i = radius; i--;)
+                {
+                    *(s_data_dst + x) += *(s_data_src + x + (i + 1)) + *(s_data_src + x - (i + 1));
+                }
+                *(s_data_dst + x) /= (2 * radius + 1);
+                x += xPage;
+            }
+            x = x0;
+            float *tmp = s_data_src;
+            s_data_src = s_data_dst;
+            s_data_dst = tmp;
+            __syncthreads();
+        }
+
+        while (y < height && x < width)
+        {
+            data[x + y * width + z * width * height] = *(s_data_src + x);
+            x += xPage;
+        }
+        x = x0;
+        ++z;
+    }
+}
+
 __global__ void g_filter_gauss_Y_flt(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius, const size_t n_iter)
 {
     size_t x = blockIdx.x;
@@ -958,6 +1019,67 @@ __global__ void g_filter_gauss_Y_flt(float *data, const size_t width, const size
     }
 }
 
+__global__ void g_filter_gauss_Y_flt_new(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius, const size_t n_iter)
+{
+    const size_t localX = threadIdx.x % 8;
+    const size_t x = blockIdx.x * 8 + localX;
+    const size_t y0 = threadIdx.y * 4 + threadIdx.x / 8;
+    size_t y = y0;
+    size_t z = 0;
+
+    const size_t yPage = 4 * blockDim.y;
+
+    extern __shared__ float s_data_GY_flt_new[];
+    float *s_data_src = s_data_GY_flt_new + radius * 8 + localX;
+    float *s_data_dst = s_data_src + height * 8 + radius * 8;
+
+    if (threadIdx.x < 8)
+    {
+        for (int i = radius; i--;)
+        {
+            *(s_data_GY_flt_new + i * 8 + localX) = *(s_data_src + height * 8 + i * 8) = *(s_data_dst + height * 8 + i * 8) = 0.0f;
+        }
+    }
+
+    while (z < depth)
+    {
+        while (y < height && x < width)
+        {
+            *(s_data_src + y * 8) = data[x + y * width + z * width * height];
+            y += yPage;
+        }
+        y = y0;
+        __syncthreads();
+
+        for (int i = n_iter; i--;)
+        {
+            while (y < height && x < width)
+            {
+                *(s_data_dst + y * 8) = *(s_data_src + y * 8);
+                for (int i = radius; i--;)
+                {
+                    *(s_data_dst + y * 8) += *(s_data_src + y * 8 + (i + 1) * 8) + *(s_data_src + y * 8 - ((i + 1) * 8));
+                }
+                *(s_data_dst + y * 8) /= 2 * radius + 1;
+                y += yPage;
+            }
+            y = y0;
+            float *tmp = s_data_src;
+            s_data_src = s_data_dst;
+            s_data_dst = tmp;
+            __syncthreads();
+        }
+
+        while (y < height && x < width)
+        {
+            data[x + y * width + z * width * height] = *(s_data_src + y * 8);
+            y += yPage;
+        }
+        y = y0;
+        ++z;
+    }
+}
+
 __global__ void g_filter_boxcar_Z_flt(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius)
 {
     size_t x = blockIdx.x;
@@ -1012,10 +1134,10 @@ __global__ void g_filter_boxcar_Z_flt(float *data, const size_t width, const siz
 
 __global__ void g_filter_boxcar_Z_flt_new(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius)
 {
-    size_t x = blockIdx.x * blockDim.x + threadIdx.x;
-    size_t y = blockIdx.y * blockDim.y + threadIdx.y;
+    const size_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    int filter_size = (2 * radius + 1);
+    const int filter_size = (2 * radius + 1);
     float value = 0.0f;
     const float invers = 1.0f / filter_size;
     extern __shared__ float s_data_BZ_flt_new[];
