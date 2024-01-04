@@ -3954,9 +3954,13 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 
 	if (useGPU)
 	{
-		// 
-		GPU_DataCube_filter_flt(self->data, maskCube->data, self->data_size, self->axis_size, kernels_spat, kernels_spec, maskScaleXY, rms, cadence, range, threshold);
-		//
+		char *mask1 = malloc(((self->axis_size[0] + 7) / 8) * self->axis_size[1] * self->axis_size[2] * sizeof(char));
+
+		GPU_DataCube_filter_flt(self->data, mask1, self->data_size, self->axis_size, kernels_spat, kernels_spec, maskScaleXY, rms, cadence, range, threshold);
+
+		DataCube_copy_mask1_to_8(maskCube, mask1);
+
+		free(mask1);
 	}
 	else
 	{
@@ -5953,4 +5957,50 @@ PRIVATE void DataCube_swap_byte_order(const DataCube *self)
 	}
 	
 	return;
+}
+
+PUBLIC void DataCube_copy_mask1_to_8 (DataCube *self, const char *source)
+{
+	message("Start Mask copy 1 to 8");
+
+	// Sanity checks
+	check_null(self);
+	check_null(source);
+	ensure(self->data_type == 8, ERR_USER_INPUT, "Target mask cube must be of 32-bit integer type.");
+	
+	char *ptrTarget = (self->data);
+	size_t width = self->axis_size[0];
+	size_t height = self->axis_size[1];
+	size_t depth = self->axis_size[2];
+	
+	#pragma omp parallel for schedule(static)
+	for (size_t z = 0; z < depth; z++)
+	{
+		for (size_t y = 0; y < height; y++) 
+		{
+			for (size_t x = 0; x < width; x+=8)
+			{
+				if (x < width - 7)
+				{
+					*(ptrTarget + x + 0 + y * width + z * width * height) = (*(source + x / 8 + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height) & (1 << 7)) >> 7;
+					*(ptrTarget + x + 1 + y * width + z * width * height) = (*(source + x / 8 + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height) & (1 << 6)) >> 6;
+					*(ptrTarget + x + 2 + y * width + z * width * height) = (*(source + x / 8 + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height) & (1 << 5)) >> 5;
+					*(ptrTarget + x + 3 + y * width + z * width * height) = (*(source + x / 8 + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height) & (1 << 4)) >> 4;
+					*(ptrTarget + x + 4 + y * width + z * width * height) = (*(source + x / 8 + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height) & (1 << 3)) >> 3;
+					*(ptrTarget + x + 5 + y * width + z * width * height) = (*(source + x / 8 + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height) & (1 << 2)) >> 2;
+					*(ptrTarget + x + 6 + y * width + z * width * height) = (*(source + x / 8 + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height) & (1 << 1)) >> 1;
+					*(ptrTarget + x + 7 + y * width + z * width * height) = (*(source + x / 8 + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height) & (1 << 0)) >> 0;
+				}
+				else
+				{
+					for (size_t i = 0; i < width - x; i++)
+					{
+						*(ptrTarget + x + i + y * width + z * width * height) = (*(source + x / 8 + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height) & (1 << (7 - i))) >> (7 - i);
+					}
+				}
+			}
+		}
+	}
+
+	message("Mask copy finished");
 }

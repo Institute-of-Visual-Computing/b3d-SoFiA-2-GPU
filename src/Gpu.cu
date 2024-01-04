@@ -530,7 +530,6 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     float *d_data_box;
     float *d_data_duo;
     char *d_mask_data;
-    char *d_original_mask;
 
     // size_t free_bytes, total_bytes;
     // cudaError_t cuda_status = cudaMemGetInfo(&free_bytes, &total_bytes);
@@ -600,8 +599,12 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     //     printf("cudaMemGetInfo failed: %s\n", cudaGetErrorString(cuda_status));
     // }
 
-    printf("Allocating %fMB for the mask\n", data_size * sizeof(char) / (1024.0f * 1024.0f));
-    cudaMalloc((void**)&d_original_mask, data_size * sizeof(char));
+    // Set up Bitmask space efficient on GPU one byte handles 8 entries in from the cube,
+    // since here we only need to mask pixels, not differ between individual sources
+    size_t d_mask_size = ((width + 7) / 8) * height * depth * sizeof(char);
+    printf("Allocating %fMB for the mask\n", d_mask_size / (1024.0f * 1024.0f));
+	cudaMalloc((void**)&d_mask_data, d_mask_size);
+    cudaMemset(d_mask_data, 0, d_mask_size);
 
     err = cudaGetLastError();
     if (err != cudaSuccess)
@@ -621,19 +624,15 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
 
     cudaMemcpy(d_data, data, data_size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_data_box, d_data, data_size * sizeof(float), cudaMemcpyDeviceToDevice);
-    cudaMemset(d_original_mask, 0, data_size * sizeof(char));
+
+    // Set up Bitmask space efficient on GPU one byte handles 8 entries in from the cube,
+    // since here we only need to mask pixels, not differ between individual sources
 
     err = cudaGetLastError();
     if (err != cudaSuccess)
     {
         printf("Cuda error after copy: %s\n", cudaGetErrorString(err));    
     }
-
-    // Set up Bitmask space efficient on GPU one byte handles 8 entries in from the cube,
-    // since here we only need to mask pixels, not differ between individual sources
-    size_t d_mask_size = ceil(width / 8.0f) * height * depth * sizeof(char);
-	cudaMalloc((void**)&d_mask_data, d_mask_size);
-    cudaMemset(d_mask_data, 0, d_mask_size);
 
     //GPU_DataCube_copy_mask_8_to_1(d_mask_data, d_original_mask, axis_size);
 
@@ -682,8 +681,9 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 {
                     printf("Starting Kernels\n");
 
-                    g_copyData_setMaskedScale8_removeBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, d_original_mask, width, height, depth, maskScaleXY * rms);
-                    //cudaDeviceSynchronize();
+                    //g_copyData_setMaskedScale8_removeBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, d_original_mask, width, height, depth, maskScaleXY * rms);
+                    g_copyData_setMaskedScale1_removeBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, d_mask_data, width, height, depth, maskScaleXY * rms);
+                    cudaDeviceSynchronize();
 
                     err = cudaGetLastError();
                     if (err != cudaSuccess)
@@ -694,14 +694,14 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 else
                 {
                     g_copyData_removeBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, width, height, depth);
-                    //cudaDeviceSynchronize();
+                    cudaDeviceSynchronize();
                 }
                 
                 if(radius_gauss > 0)
                 {
                     printf("Launching Gauss X…\n");
                     g_filter_gauss_X_flt_new<<<gridSizeX, blockSizeX, (16 * width + 17 * radius_gauss) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
-                    //cudaDeviceSynchronize();
+                    cudaDeviceSynchronize();
 
                     err = cudaGetLastError();
                     if (err != cudaSuccess)
@@ -715,7 +715,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                     printf("Launching Gauss Y…\n");
 
                     g_filter_gauss_Y_flt_new<<<gridSizeY, blockSizeY, (16 * height + 24 * radius_gauss) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
-                    //cudaDeviceSynchronize();
+                    cudaDeviceSynchronize();
 
                     err = cudaGetLastError();
                     if (err != cudaSuccess)
@@ -729,7 +729,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                     printf("Launching Boxcar Z…\n");
 
                     g_filter_boxcar_Z_flt_new<<<gridSizeZ, blockSizeZ, (2 * radius_boxcar + 1) * blockSizeZ.x * blockSizeZ.y * sizeof(float)>>>(d_data_box, width, height, depth, radius_boxcar);
-                    //cudaDeviceSynchronize();
+                    cudaDeviceSynchronize();
 
                     err = cudaGetLastError();
                     if (err != cudaSuccess)
@@ -742,19 +742,20 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 g_addBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, width, height, depth);
 
                 g_std_dev_val_flt<<<gridSizeNoise, blockSizeNoise, 1024 * 2 * sizeof(float)>>>(d_data_box, d_data_duo, data_size, 0.0f, cadence, range);
-                //cudaDeviceSynchronize();
+                cudaDeviceSynchronize();
 
                 //float noise[2] = {0,0};
                 //cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
 
                 g_std_dev_val_flt_final_step<<<1,1>>>(d_data_duo);
-                //cudaDeviceSynchronize();
+                cudaDeviceSynchronize();
 
                 //cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
 
                 //printf("Final noise: %.3e\n\n", noise[0]);
 
-                g_Mask8<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_original_mask, width, height, depth, threshold, d_data_duo, 1);
+                //g_Mask8<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_original_mask, width, height, depth, threshold, d_data_duo, 1);
+                g_Mask1<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_mask_data, width, height, depth, threshold, d_data_duo, 1);
 
                 err = cudaGetLastError();
                 if (err != cudaSuccess)
@@ -765,35 +766,46 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
             else
             {
                 g_std_dev_val_flt<<<gridSizeNoise, blockSizeNoise, 1024 * 2 * sizeof(float)>>>(d_data, d_data_duo, data_size, 0.0f, cadence, range);
-                //cudaDeviceSynchronize();
+                cudaDeviceSynchronize();
                 g_std_dev_val_flt_final_step<<<1,1>>>(d_data_duo);
-                //cudaDeviceSynchronize();
-
-                //float noise[2] = {0,0};
-                //cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
-
-                //printf("noise: %.3e\n\n", noise[0]);
-
-                g_Mask8<<<gridSizeMS, blockSizeMS>>>(d_data, d_original_mask, width, height, depth, threshold, d_data_duo, 1);
+                cudaDeviceSynchronize();
 
                 err = cudaGetLastError();
                 if (err != cudaSuccess)
                 {
                     printf("Cuda error after noise calc: %s\n", cudaGetErrorString(err));    
                 }
+
+                //float noise[2] = {0,0};
+                //cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
+
+                //printf("noise: %.3e\n\n", noise[0]);
+
+                //g_Mask8<<<gridSizeMS, blockSizeMS>>>(d_data, d_original_mask, width, height, depth, threshold, d_data_duo, 1);
+                g_Mask1<<<gridSizeMS, blockSizeMS>>>(d_data, d_mask_data, width, height, depth, threshold, d_data_duo, 1);
+                cudaDeviceSynchronize();
+
+                err = cudaGetLastError();
+                if (err != cudaSuccess)
+                {
+                    printf("Cuda error after first Masking: %s\n", cudaGetErrorString(err));
+                }
             }
         }
     }
 
-    cudaMemcpy(maskdata, d_original_mask, data_size * sizeof(char), cudaMemcpyDeviceToHost);
+    //g_DataCube_copy_mask_1_to_8<<<gridSizeMS, blockSizeMS>>>(d_original_mask, d_mask_data, width, height, depth);
+    cudaDeviceSynchronize();
+    cudaMemcpy(maskdata, d_mask_data, d_mask_size, cudaMemcpyDeviceToHost);
 
-    //cudaDeviceSynchronize();
+    cudaDeviceSynchronize();
 
     cudaFree(d_data);
     cudaFree(d_data_box);
     cudaFree(d_mask_data);
-    cudaFree(d_original_mask);
     cudaFree(d_data_duo);
+
+    printf("Finished GPU\n");
 }
 
 __global__ void g_copyData_removeBlanks(float *data_box, float *data, const size_t width, const size_t height, const size_t depth)
@@ -832,37 +844,21 @@ __global__ void g_copyData_setMaskedScale1_removeBlanks(float *data_box, float *
 {
     size_t x = blockIdx.x * blockDim.x + threadIdx.x;
     size_t y = blockIdx.y * blockDim.y + threadIdx.y;
-    size_t maskWidth = ceil(width / 8.0f);
-    size_t index = y * maskWidth + x;
-    size_t page_size = width * height;
-    size_t mask_page_size = maskWidth * height;
+    size_t z = 0;
 
-    if (x >= maskWidth || y >= height) {return;}
+    size_t index = x + y * width;
+    size_t index1 = (x / 8) + y * ((width + 7) / 8);
 
-    size_t pageNumber = 0;
-    while (index < mask_page_size * depth)
+    if (x < width && y < height)
     {
-        if (x == maskWidth - 1)
+        while (z < depth)
         {
-            for (int i = 0; x * 8 + i < width; ++i)
-            {
-                data_box[index * 8 + i] = (*(maskData1 + index) & (1 << (7 - i))) ? copysign(value, data[index * 8 + i]) : data[index * 8 + i];
-            }
+            data_box[index] = ((maskData1[index1] & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(value, data[index]) + (((maskData1[index1] & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * FILTER_NAN(data[index]);
+
+            index += width * height;
+            index1 += ((width + 7) / 8) * height;
+            z += 1;
         }
-        else
-        {
-            data_box[x * 8 + y * width + 0] = (*(maskData1 + index) & (1 << 7)) ? copysign(value, data[x * 8 + y * width + 0]) : FILTER_NAN(data[x * 8 + y * width + 0]);
-            data_box[x * 8 + y * width + 1] = (*(maskData1 + index) & (1 << 6)) ? copysign(value, data[x * 8 + y * width + 1]) : FILTER_NAN(data[x * 8 + y * width + 1]);
-            data_box[x * 8 + y * width + 2] = (*(maskData1 + index) & (1 << 5)) ? copysign(value, data[x * 8 + y * width + 2]) : FILTER_NAN(data[x * 8 + y * width + 2]);
-            data_box[x * 8 + y * width + 3] = (*(maskData1 + index) & (1 << 4)) ? copysign(value, data[x * 8 + y * width + 3]) : FILTER_NAN(data[x * 8 + y * width + 3]);
-            data_box[x * 8 + y * width + 4] = (*(maskData1 + index) & (1 << 3)) ? copysign(value, data[x * 8 + y * width + 4]) : FILTER_NAN(data[x * 8 + y * width + 4]);
-            data_box[x * 8 + y * width + 5] = (*(maskData1 + index) & (1 << 2)) ? copysign(value, data[x * 8 + y * width + 5]) : FILTER_NAN(data[x * 8 + y * width + 5]);
-            data_box[x * 8 + y * width + 6] = (*(maskData1 + index) & (1 << 1)) ? copysign(value, data[x * 8 + y * width + 6]) : FILTER_NAN(data[x * 8 + y * width + 6]);
-            data_box[x * 8 + y * width + 7] = (*(maskData1 + index) & (1 << 0)) ? copysign(value, data[x * 8 + y * width + 7]) : FILTER_NAN(data[x * 8 + y * width + 7]);
-        }
-        
-        index += mask_page_size;
-        pageNumber++;
     }
 }
 
@@ -874,17 +870,12 @@ __global__ void g_copyData_setMaskedScale8_removeBlanks(float *data_box, float *
     if (x >= width || y >= height) {return;}
 
     size_t index = x + y * width;
-
-    float *srcPtr = data + index;
-    float *dstPtr = data_box + index;
     float currentData;
 
     while (index < width * height * depth)
     {
-        currentData = *srcPtr;
-        *dstPtr = ((int8_t)(maskData8[index])) ? copysign(value, currentData) : FILTER_NAN(currentData);
-        srcPtr += width * height;
-        dstPtr += width * height;
+        currentData = data[index];
+        data_box[index]= ((int8_t)(maskData8[index])) * copysign(value, currentData) + ((int8_t)(maskData8[index]) ^ 1) * FILTER_NAN(currentData);
         index += width * height;
     }
 }
@@ -1307,7 +1298,8 @@ __global__ void g_Mask8(float *data_box, char *maskData8, const size_t width, co
 
     while (index < width * height * depth)
     {
-        if (fabs(data_box[index]) > threshold * (*rms_smooth)) {maskData8[index] = (char)1;}
+        //if (fabs(data_box[index]) > threshold * (*rms_smooth)) {maskData8[index] = (char)1;}
+        maskData8[index] |= !(__float_as_int(fabs(data_box[index]) - threshold * (*rms_smooth)) >> 31);
         index += width * height;
     }
 }
@@ -1315,60 +1307,36 @@ __global__ void g_Mask8(float *data_box, char *maskData8, const size_t width, co
 __global__ void g_Mask1(float *data_box, char *maskData1, const size_t width, const size_t height, const size_t depth, const double threshold, float *rms_smooth, const int8_t value)
 {
     size_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t x1 = x / 8;
     size_t y = blockIdx.y * blockDim.y + threadIdx.y;
-    size_t maskIndex = x + y * (int)ceil(width / 8.0f);
-    size_t index = 8 * x + y * width;
+    size_t z = 0;
 
-    if (x * 8 >= width || y >= height) {return;}
+    size_t index = x + y * width;
+    size_t index1 = x1 + y * ((width + 7) / 8);
 
-    u_int8_t result = 0;
+    uint8_t result = 0;
 
-    extern __shared__ float s_data_m1_flt[];
-    float *s_data_start = s_data_m1_flt + x * 8 + y * blockDim.x * 8;
-
-    while (index < width * height * depth)
+    if (x < width && y < height)
     {
-        if (x * 8 + 7 >= width)
+        while (z < depth)
         {
-            int i = 0;
-            while (x * 8 + i < width)
+            result = (!(__float_as_int(fabs(data_box[index]) - threshold * (*rms_smooth)) >> 31)) << (7 - (threadIdx.x % 8));
+
+            __syncwarp();
+
+            for (int offset = 1; offset < 8; offset *= 2)
             {
-                s_data_start[i] = data_box[index + i];
-                i++;
+                result |= __shfl_down_sync(0xffffffff, result, offset);
             }
-            while (i < 8)
-            {
-                s_data_start[i] = 0;
-                i++;
-            }
+
+            __syncwarp();
+
+            if (threadIdx.x % 8 == 0) {maskData1[index1] |= result;}
+            result = 0;
+            index += width * height;
+            index1 += ((width + 7) / 8) * height;
+            z += 1;
         }
-        else
-        {
-            s_data_start[0] = data_box[index + 0];
-            s_data_start[1] = data_box[index + 1];
-            s_data_start[2] = data_box[index + 2];
-            s_data_start[3] = data_box[index + 3];
-            s_data_start[4] = data_box[index + 4];
-            s_data_start[5] = data_box[index + 5];
-            s_data_start[6] = data_box[index + 6];
-            s_data_start[7] = data_box[index + 7];
-        }
-
-        result = maskData1[maskIndex];
-
-        result |= (fabs(s_data_start[0]) > threshold * (*rms_smooth)) << 7;
-        result |= (fabs(s_data_start[1]) > threshold * (*rms_smooth)) << 6;
-        result |= (fabs(s_data_start[2]) > threshold * (*rms_smooth)) << 5;
-        result |= (fabs(s_data_start[3]) > threshold * (*rms_smooth)) << 4;
-        result |= (fabs(s_data_start[4]) > threshold * (*rms_smooth)) << 3;
-        result |= (fabs(s_data_start[5]) > threshold * (*rms_smooth)) << 2;
-        result |= (fabs(s_data_start[6]) > threshold * (*rms_smooth)) << 1;
-        result |= (fabs(s_data_start[7]) > threshold * (*rms_smooth)) << 0;
-
-        maskData1[maskIndex] = (char)result;
-
-        maskIndex += (int)ceil(width / 8.0f) * height;
-        index += width * height;
     }
 }
 
@@ -2111,7 +2079,6 @@ __global__ void g_DataCube_copy_mask_1_to_8(char *mask8, char *mask1, size_t wid
     {
         while (z < depth)
         {
-            printf("x: %lu y: %lu z: %lu\n", x8, y, z);
             if (x8 < width - 7)
             {
                 mask8[index8 + 0] = (mask1[index1] & (1 << 7)) >> 7;
@@ -2127,7 +2094,7 @@ __global__ void g_DataCube_copy_mask_1_to_8(char *mask8, char *mask1, size_t wid
             {
                 for (int i = 0; x8 + i < width; i++)
                 {
-                    mask8[index8 + i] = (mask1[index1] & (1 << 7 - i)) >> (7 - i);
+                    mask8[index8 + i] = (mask1[index1] & (1 << (7 - i))) >> (7 - i);
                 }
             }
 
