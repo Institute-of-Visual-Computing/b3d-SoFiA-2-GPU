@@ -435,6 +435,65 @@ void GPU_test_flag_sources()
     printf("Finished GPU\n");
 }
 
+void GPU_test_cpy_msk_1_to_8()
+{
+    u_int8_t data[4] = {1,3,255,128+32+4+1};
+    u_int8_t result[28];
+
+    printf("Array to get median: ");
+
+	for (int i = 0 ; i < 4; i++){printf("%i ", data[i]);}
+
+	printf("\n");
+
+    char *mask1;
+    char *mask8;
+
+    cudaMalloc((void**)&mask1, 4 * sizeof(char));
+    cudaMalloc((void**)&mask8, 28 * sizeof(char));
+
+    cudaMemset(mask1, 0, 4 * sizeof(char));
+    cudaMemset(mask8, 0, 28 * sizeof(char));
+
+    cudaMemcpy(mask1, data, 4 * sizeof(char), cudaMemcpyHostToDevice);
+
+    cudaError_t err = cudaGetLastError();
+
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error at start: %s\n", cudaGetErrorString(err));  
+    }
+
+    cudaDeviceSynchronize();
+
+    dim3 blockSize(32,32);
+    dim3 gridSize(1,1);
+
+    g_DataCube_copy_mask_1_to_8<<<gridSize, blockSize>>>(mask8, mask1, 7,2,2);
+
+    cudaDeviceSynchronize();
+
+    err = cudaGetLastError();
+
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error at start: %s\n", cudaGetErrorString(err));  
+    }
+
+    cudaMemcpy(result, mask8, 28 * sizeof(char), cudaMemcpyDeviceToHost);
+
+    cudaDeviceSynchronize();
+
+    printf("Array to get median: ");
+
+	for (int i = 0 ; i < 28; i++){printf("%i ", result[i]);}
+
+	printf("\n");
+
+    cudaFree(mask1);
+    cudaFree(mask8);
+}
+
 void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const double rms, const size_t cadence, const int range, const double threshold)
 {
     printf("Starting GPU\n");
@@ -816,9 +875,16 @@ __global__ void g_copyData_setMaskedScale8_removeBlanks(float *data_box, float *
 
     size_t index = x + y * width;
 
+    float *srcPtr = data + index;
+    float *dstPtr = data_box + index;
+    float currentData;
+
     while (index < width * height * depth)
     {
-        data_box[index] = ((int8_t)(maskData8[index])) ? copysign(value, data[index]) : FILTER_NAN(data[index]);
+        currentData = *srcPtr;
+        *dstPtr = ((int8_t)(maskData8[index])) ? copysign(value, currentData) : FILTER_NAN(currentData);
+        srcPtr += width * height;
+        dstPtr += width * height;
         index += width * height;
     }
 }
@@ -2028,6 +2094,47 @@ __global__ void g_DataCube_copy_mask_8_to_1(char* maskData1, char* maskData8, si
         }
 
         z++;
+    }
+}
+
+__global__ void g_DataCube_copy_mask_1_to_8(char *mask8, char *mask1, size_t width, size_t height, size_t depth)
+{
+    size_t x1 = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t x8 = x1 * 8;
+    size_t y = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t z = 0;
+
+    size_t index1 = x1 + y * ((width + 7) / 8);
+    size_t index8 = x8 + y * width;
+
+    if (x8 < width && y < height)
+    {
+        while (z < depth)
+        {
+            printf("x: %lu y: %lu z: %lu\n", x8, y, z);
+            if (x8 < width - 7)
+            {
+                mask8[index8 + 0] = (mask1[index1] & (1 << 7)) >> 7;
+                mask8[index8 + 1] = (mask1[index1] & (1 << 6)) >> 6;
+                mask8[index8 + 2] = (mask1[index1] & (1 << 5)) >> 5;
+                mask8[index8 + 3] = (mask1[index1] & (1 << 4)) >> 4;
+                mask8[index8 + 4] = (mask1[index1] & (1 << 3)) >> 3;
+                mask8[index8 + 5] = (mask1[index1] & (1 << 2)) >> 2;
+                mask8[index8 + 6] = (mask1[index1] & (1 << 1)) >> 1;
+                mask8[index8 + 7] = (mask1[index1] & (1 << 0)) >> 0;
+            }
+            else
+            {
+                for (int i = 0; x8 + i < width; i++)
+                {
+                    mask8[index8 + i] = (mask1[index1] & (1 << 7 - i)) >> (7 - i);
+                }
+            }
+
+            index1 += ((width + 7) / 8) * height;
+            index8 += width * height;
+            z += 1;
+        }
     }
 }
 

@@ -1,3 +1,5 @@
+//#pragma once
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <cuda_runtime.h>
@@ -32,6 +34,8 @@ void GPU_test_median();
 void GPU_test_copy_originalMask();
 
 void GPU_test_flag_sources();
+
+void GPU_test_cpy_msk_1_to_8();
 
 void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const double rms, const size_t cadence, const int range, const double threshold);
 
@@ -93,6 +97,8 @@ __global__ void g_DataCube_gauss_filter_XDir(float *data, float *data_box, int w
 __global__ void g_DataCube_gauss_filter_YDir(float *data, float *data_box, int word_size, size_t width, size_t height, size_t depth, size_t radius, size_t n_iter);
 
 __global__ void g_DataCube_copy_mask_8_to_1(char *maskData1, char *maskData8, size_t width, size_t height, size_t depth);
+
+__global__ void g_DataCube_copy_mask_1_to_8(char *mask8, char *mask1, size_t width, size_t height, size_t depth);
 
 __global__ void g_DataCube_copy_back_smoothed_cube(char *originalData, float *data, int word_size, size_t width, size_t height, size_t depth);
 
