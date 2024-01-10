@@ -681,9 +681,25 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 {
                     printf("Starting Kernels\n");
 
-                    //g_copyData_setMaskedScale8_removeBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, d_original_mask, width, height, depth, maskScaleXY * rms);
-                    g_copyData_setMaskedScale1_removeBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, d_mask_data, width, height, depth, maskScaleXY * rms);
-                    cudaDeviceSynchronize();
+                    if (radius_boxcar > 0)
+                    {
+                        printf("Launching data copy, flux masking, NAN deletion and Boxcar Z…\n");
+
+                        g_copyData_setMaskedScale1_removeBlanks_filter_boxcar_Z_flt<<<gridSizeZ, blockSizeZ, (2 * radius_boxcar + 1) * blockSizeZ.x * blockSizeZ.y * sizeof(float)>>>(d_data_box, d_data, d_mask_data, width, height, depth, maskScaleXY * rms, radius_boxcar);
+                        cudaDeviceSynchronize();
+
+                        err = cudaGetLastError();
+                        if (err != cudaSuccess)
+                        {
+                            printf("Cuda error after Z Kernel: %s\n", cudaGetErrorString(err));    
+                        }
+                    }
+                    else
+                    {
+                        //g_copyData_setMaskedScale8_removeBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, d_original_mask, width, height, depth, maskScaleXY * rms);
+                        g_copyData_setMaskedScale1_removeBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, d_mask_data, width, height, depth, maskScaleXY * rms);
+                        cudaDeviceSynchronize();
+                    }
 
                     err = cudaGetLastError();
                     if (err != cudaSuccess)
@@ -724,7 +740,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                     }
                 }
 
-                if(radius_boxcar > 0) 
+                if(radius_boxcar > 0 && false) 
                 {
                     printf("Launching Boxcar Z…\n");
 
@@ -858,6 +874,325 @@ __global__ void g_copyData_setMaskedScale1_removeBlanks(float *data_box, float *
             index += width * height;
             index1 += ((width + 7) / 8) * height;
             z += 1;
+        }
+    }
+}
+
+__global__ void g_copyData_setMaskedScale1_removeBlanks_filter_boxcar_Z_flt(float *data_box, float *data, char *maskData1, const size_t width, const size_t height, const size_t depth, const float maskValue, const size_t radius)
+{
+    const size_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    const int filter_size = (2 * radius + 1);
+    float value = 0.0f;
+    const float invers = 1.0f / filter_size;
+    extern __shared__ float s_data_BZ_flt_new[];
+    float *s_data_start = s_data_BZ_flt_new + (threadIdx.x + threadIdx.y * blockDim.x) * filter_size;
+    int ptr = 0;    
+
+    float in0;
+    float in1;
+    float in2;
+    float in3;
+    float in4;
+    float in5;
+    float in6;
+    float in7;
+
+    float out0;
+    float out1;
+    float out2;
+    float out3;
+    float out4;
+    float out5;
+    float out6;
+    float out7;
+
+    char mask0;
+    char mask1;
+    char mask2;
+    char mask3;
+    char mask4;
+    char mask5;
+    char mask6;
+    char mask7;
+
+    float locvar;
+    char maskvar;
+
+    int preFetCnt = -1;
+
+    if (x < width && y < height)
+    {
+        for (int z = depth; z--;)
+        {
+            preFetCnt = ++preFetCnt % 8;
+            if (preFetCnt == 0)
+            {
+                if ( z > 6)
+                {
+                    in0 = data[x + y * width + z * width * height];
+                    in1 = data[x + y * width + (z - 1) * width * height];
+                    in2 = data[x + y * width + (z - 2) * width * height];
+                    in3 = data[x + y * width + (z - 3) * width * height];
+                    in4 = data[x + y * width + (z - 4) * width * height];
+                    in5 = data[x + y * width + (z - 5) * width * height];
+                    in6 = data[x + y * width + (z - 6) * width * height];
+                    in7 = data[x + y * width + (z - 7) * width * height];
+
+                    mask0 = maskData1[(x / 8) + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height];
+                    mask1 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 1) * ((width + 7) / 8) * height];
+                    mask2 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 2) * ((width + 7) / 8) * height];
+                    mask3 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 3) * ((width + 7) / 8) * height];
+                    mask4 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 4) * ((width + 7) / 8) * height];
+                    mask5 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 5) * ((width + 7) / 8) * height];
+                    mask6 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 6) * ((width + 7) / 8) * height];
+                    mask7 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 7) * ((width + 7) / 8) * height];
+                }
+                else if ( z > 5)
+                {
+                    in0 = data[x + y * width + z * width * height];
+                    in1 = data[x + y * width + (z - 1) * width * height];
+                    in2 = data[x + y * width + (z - 2) * width * height];
+                    in3 = data[x + y * width + (z - 3) * width * height];
+                    in4 = data[x + y * width + (z - 4) * width * height];
+                    in5 = data[x + y * width + (z - 5) * width * height];
+                    in6 = data[x + y * width + (z - 6) * width * height];
+
+                    mask0 = maskData1[(x / 8) + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height];
+                    mask1 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 1) * ((width + 7) / 8) * height];
+                    mask2 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 2) * ((width + 7) / 8) * height];
+                    mask3 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 3) * ((width + 7) / 8) * height];
+                    mask4 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 4) * ((width + 7) / 8) * height];
+                    mask5 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 5) * ((width + 7) / 8) * height];
+                    mask6 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 6) * ((width + 7) / 8) * height];
+                }
+                else if ( z > 4)
+                {
+                    in0 = data[x + y * width + z * width * height];
+                    in1 = data[x + y * width + (z - 1) * width * height];
+                    in2 = data[x + y * width + (z - 2) * width * height];
+                    in3 = data[x + y * width + (z - 3) * width * height];
+                    in4 = data[x + y * width + (z - 4) * width * height];
+                    in5 = data[x + y * width + (z - 5) * width * height];
+
+                    mask0 = maskData1[(x / 8) + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height];
+                    mask1 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 1) * ((width + 7) / 8) * height];
+                    mask2 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 2) * ((width + 7) / 8) * height];
+                    mask3 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 3) * ((width + 7) / 8) * height];
+                    mask4 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 4) * ((width + 7) / 8) * height];
+                    mask5 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 5) * ((width + 7) / 8) * height];
+                }
+                else if ( z > 3)
+                {
+                    in0 = data[x + y * width + z * width * height];
+                    in1 = data[x + y * width + (z - 1) * width * height];
+                    in2 = data[x + y * width + (z - 2) * width * height];
+                    in3 = data[x + y * width + (z - 3) * width * height];
+                    in4 = data[x + y * width + (z - 4) * width * height];
+
+                    mask0 = maskData1[(x / 8) + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height];
+                    mask1 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 1) * ((width + 7) / 8) * height];
+                    mask2 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 2) * ((width + 7) / 8) * height];
+                    mask3 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 3) * ((width + 7) / 8) * height];
+                    mask4 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 4) * ((width + 7) / 8) * height];
+                }
+                else if ( z > 2)
+                {
+                    in0 = data[x + y * width + z * width * height];
+                    in1 = data[x + y * width + (z - 1) * width * height];
+                    in2 = data[x + y * width + (z - 2) * width * height];
+                    in3 = data[x + y * width + (z - 3) * width * height];
+
+                    mask0 = maskData1[(x / 8) + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height];
+                    mask1 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 1) * ((width + 7) / 8) * height];
+                    mask2 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 2) * ((width + 7) / 8) * height];
+                    mask3 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 3) * ((width + 7) / 8) * height];
+                }
+                else if (z > 1)
+                {
+                    in0 = data[x + y * width + z * width * height];
+                    in1 = data[x + y * width + (z - 1) * width * height];
+                    in2 = data[x + y * width + (z - 2) * width * height];
+
+                    mask0 = maskData1[(x / 8) + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height];
+                    mask1 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 1) * ((width + 7) / 8) * height];
+                    mask2 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 2) * ((width + 7) / 8) * height];
+                }
+                else if (z > 0)
+                {
+                    in0 = data[x + y * width + z * width * height];
+                    in1 = data[x + y * width + (z - 1) * width * height];
+
+                    mask0 = maskData1[(x / 8) + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height];
+                    mask1 = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - 1) * ((width + 7) / 8) * height];
+                }
+                else
+                {
+                    in0 = data[x + y * width + z * width * height];
+
+                    mask0 = maskData1[(x / 8) + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height];
+                }
+                
+            }
+
+            if (z < depth - filter_size)
+            {
+                //value -= data[x + y * width + (z + filter_size) * width * height];
+                value -= s_data_start[ptr];
+            }
+
+            switch (preFetCnt) 
+            {
+                case 0: locvar = in0; maskvar = mask0; break;
+                case 1: locvar = in1; maskvar = mask1; break;
+                case 2: locvar = in2; maskvar = mask2; break;
+                case 3: locvar = in3; maskvar = mask3; break;
+                case 4: locvar = in4; maskvar = mask4; break;
+                case 5: locvar = in5; maskvar = mask5; break;
+                case 6: locvar = in6; maskvar = mask6; break;
+                case 7: locvar = in7; maskvar = mask7; break;
+            }
+
+            locvar = ((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(maskValue, locvar) + (((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * FILTER_NAN(locvar);
+
+            value += s_data_start[ptr++] = locvar;
+            ptr = ptr % filter_size;
+
+            switch (preFetCnt) 
+            {
+                case 0: out0 = value * invers; break;
+                case 1: out1 = value * invers; break;
+                case 2: out2 = value * invers; break;
+                case 3: out3 = value * invers; break;
+                case 4: out4 = value * invers; break;
+                case 5: out5 = value * invers; break;
+                case 6: out6 = value * invers; break;
+                case 7: out7 = value * invers; break;
+            }
+
+            if (preFetCnt == 7)
+            {
+                if (z < depth - radius - 7)
+                {
+                    data_box[x + y * width + (z + radius) * width * height] = out7;
+                    data_box[x + y * width + (z + 1 + radius) * width * height] = out6;
+                    data_box[x + y * width + (z + 2 + radius) * width * height] = out5;
+                    data_box[x + y * width + (z + 3 + radius) * width * height] = out4;
+                    data_box[x + y * width + (z + 4 + radius) * width * height] = out3;
+                    data_box[x + y * width + (z + 5 + radius) * width * height] = out2;
+                    data_box[x + y * width + (z + 6 + radius) * width * height] = out1;
+                    data_box[x + y * width + (z + 7 + radius) * width * height] = out0;
+                }
+                else if (z < depth - radius - 6)
+                {
+                    data_box[x + y * width + (z + radius) * width * height] = out7;
+                    data_box[x + y * width + (z + 1 + radius) * width * height] = out6;
+                    data_box[x + y * width + (z + 2 + radius) * width * height] = out5;
+                    data_box[x + y * width + (z + 3 + radius) * width * height] = out4;
+                    data_box[x + y * width + (z + 4 + radius) * width * height] = out3;
+                    data_box[x + y * width + (z + 5 + radius) * width * height] = out2;
+                    data_box[x + y * width + (z + 6 + radius) * width * height] = out1;
+                }
+                else if (z < depth - radius - 5)
+                {
+                    data_box[x + y * width + (z + radius) * width * height] = out7;
+                    data_box[x + y * width + (z + 1 + radius) * width * height] = out6;
+                    data_box[x + y * width + (z + 2 + radius) * width * height] = out5;
+                    data_box[x + y * width + (z + 3 + radius) * width * height] = out4;
+                    data_box[x + y * width + (z + 4 + radius) * width * height] = out3;
+                    data_box[x + y * width + (z + 5 + radius) * width * height] = out2;
+                }
+                else if (z < depth - radius - 4)
+                {
+                    data_box[x + y * width + (z + radius) * width * height] = out7;
+                    data_box[x + y * width + (z + 1 + radius) * width * height] = out6;
+                    data_box[x + y * width + (z + 2 + radius) * width * height] = out5;
+                    data_box[x + y * width + (z + 3 + radius) * width * height] = out4;
+                    data_box[x + y * width + (z + 4 + radius) * width * height] = out3;
+                }
+                else if (z < depth - radius - 3)
+                {
+                    data_box[x + y * width + (z + radius) * width * height] = out7;
+                    data_box[x + y * width + (z + 1 + radius) * width * height] = out6;
+                    data_box[x + y * width + (z + 2 + radius) * width * height] = out5;
+                    data_box[x + y * width + (z + 3 + radius) * width * height] = out4;
+                }
+                else if (z < depth - radius - 2)
+                {
+                    data_box[x + y * width + (z + radius) * width * height] = out7;
+                    data_box[x + y * width + (z + 1 + radius) * width * height] = out6;
+                    data_box[x + y * width + (z + 2 + radius) * width * height] = out5;
+                }
+                else if (z < depth - radius - 1)
+                {
+                    data_box[x + y * width + (z + radius) * width * height] = out7;
+                    data_box[x + y * width + (z + 1 + radius) * width * height] = out6;
+                }
+                else if (z < depth - radius)
+                {
+                    data_box[x + y * width + (z + radius) * width * height] = out7;
+                }
+                
+            }
+        }
+
+        if (preFetCnt == 6)
+        {
+            data_box[x + y * width + (radius) * width * height] = out6;
+            data_box[x + y * width + (1 + radius) * width * height] = out5;
+            data_box[x + y * width + (2 + radius) * width * height] = out4;
+            data_box[x + y * width + (3 + radius) * width * height] = out3;
+            data_box[x + y * width + (4 + radius) * width * height] = out2;
+            data_box[x + y * width + (5 + radius) * width * height] = out1;
+            data_box[x + y * width + (6 + radius) * width * height] = out0;
+        }
+        else if (preFetCnt == 5)
+        {
+            data_box[x + y * width + (radius) * width * height] = out5;
+            data_box[x + y * width + (1 + radius) * width * height] = out4;
+            data_box[x + y * width + (2 + radius) * width * height] = out3;
+            data_box[x + y * width + (3 + radius) * width * height] = out2;
+            data_box[x + y * width + (4 + radius) * width * height] = out1;
+            data_box[x + y * width + (5 + radius) * width * height] = out0;
+        }
+        else if (preFetCnt == 4)
+        {
+            data_box[x + y * width + (radius) * width * height] = out4;
+            data_box[x + y * width + (1 + radius) * width * height] = out3;
+            data_box[x + y * width + (2 + radius) * width * height] = out2;
+            data_box[x + y * width + (3 + radius) * width * height] = out1;
+            data_box[x + y * width + (4 + radius) * width * height] = out0;
+        }
+        else if (preFetCnt == 3)
+        {
+            data_box[x + y * width + (radius) * width * height] = out3;
+            data_box[x + y * width + (1 + radius) * width * height] = out2;
+            data_box[x + y * width + (2 + radius) * width * height] = out1;
+            data_box[x + y * width + (3 + radius) * width * height] = out0;
+        }
+        else if (preFetCnt == 2)
+        {
+            data_box[x + y * width + (radius) * width * height] = out2;
+            data_box[x + y * width + (1 + radius) * width * height] = out1;
+            data_box[x + y * width + (2 + radius) * width * height] = out0;
+        }
+        else if (preFetCnt == 1)
+        {
+            data_box[x + y * width + (radius) * width * height] = out1;
+            data_box[x + y * width + (1 + radius) * width * height] = out0;
+        }
+        else if (preFetCnt == 0)
+        {
+            data_box[x + y * width + (radius) * width * height] = out0;
+        }
+
+        for (int z = radius; z--;)
+        {
+            //value -= data[x + y * width + (z + radius + 1) * width * height];
+            value -= s_data_start[ptr++];
+            ptr = ptr % filter_size;
+            data_box[x + y * width + z * width * height] = value * invers;
         }
     }
 }
@@ -1201,24 +1536,252 @@ __global__ void g_filter_boxcar_Z_flt_new(float *data, const size_t width, const
     float *s_data_start = s_data_BZ_flt_new + (threadIdx.x + threadIdx.y * blockDim.x) * filter_size;
     int ptr = 0;    
 
+    float in0;
+    float in1;
+    float in2;
+    float in3;
+    float in4;
+    float in5;
+    float in6;
+    float in7;
+
+    float out0;
+    float out1;
+    float out2;
+    float out3;
+    float out4;
+    float out5;
+    float out6;
+    float out7;
+
+    float locvar;
+
+    int preFetCnt = -1;
+
     if (x < width && y < height)
     {
         for (int z = depth; z--;)
         {
+            preFetCnt = ++preFetCnt % 8;
+            if (preFetCnt == 0)
+            {
+                if ( z > 6)
+                {
+                    in0 = data[x + y * width + z * width * height];
+                    in1 = data[x + y * width + (z - 1) * width * height];
+                    in2 = data[x + y * width + (z - 2) * width * height];
+                    in3 = data[x + y * width + (z - 3) * width * height];
+                    in4 = data[x + y * width + (z - 4) * width * height];
+                    in5 = data[x + y * width + (z - 5) * width * height];
+                    in6 = data[x + y * width + (z - 6) * width * height];
+                    in7 = data[x + y * width + (z - 7) * width * height];
+                }
+                else if ( z > 5)
+                {
+                    in0 = data[x + y * width + z * width * height];
+                    in1 = data[x + y * width + (z - 1) * width * height];
+                    in2 = data[x + y * width + (z - 2) * width * height];
+                    in3 = data[x + y * width + (z - 3) * width * height];
+                    in4 = data[x + y * width + (z - 4) * width * height];
+                    in5 = data[x + y * width + (z - 5) * width * height];
+                    in6 = data[x + y * width + (z - 6) * width * height];
+                }
+                else if ( z > 4)
+                {
+                    in0 = data[x + y * width + z * width * height];
+                    in1 = data[x + y * width + (z - 1) * width * height];
+                    in2 = data[x + y * width + (z - 2) * width * height];
+                    in3 = data[x + y * width + (z - 3) * width * height];
+                    in4 = data[x + y * width + (z - 4) * width * height];
+                    in5 = data[x + y * width + (z - 5) * width * height];
+                }
+                else if ( z > 3)
+                {
+                    in0 = data[x + y * width + z * width * height];
+                    in1 = data[x + y * width + (z - 1) * width * height];
+                    in2 = data[x + y * width + (z - 2) * width * height];
+                    in3 = data[x + y * width + (z - 3) * width * height];
+                    in4 = data[x + y * width + (z - 4) * width * height];
+                }
+                else if ( z > 2)
+                {
+                    in0 = data[x + y * width + z * width * height];
+                    in1 = data[x + y * width + (z - 1) * width * height];
+                    in2 = data[x + y * width + (z - 2) * width * height];
+                    in3 = data[x + y * width + (z - 3) * width * height];
+                }
+                else if (z > 1)
+                {
+                    in0 = data[x + y * width + z * width * height];
+                    in1 = data[x + y * width + (z - 1) * width * height];
+                    in2 = data[x + y * width + (z - 2) * width * height];
+                }
+                else if (z > 0)
+                {
+                    in0 = data[x + y * width + z * width * height];
+                    in1 = data[x + y * width + (z - 1) * width * height];
+                }
+                else
+                {
+                    in0 = data[x + y * width + z * width * height];
+                }
+                
+            }
+
             if (z < depth - filter_size)
             {
                 //value -= data[x + y * width + (z + filter_size) * width * height];
                 value -= s_data_start[ptr];
             }
 
-            value += s_data_start[ptr++] = data[x + y * width + z * width * height];
+            switch (preFetCnt) 
+            {
+                case 0: locvar = in0; break;
+                case 1: locvar = in1; break;
+                case 2: locvar = in2; break;
+                case 3: locvar = in3; break;
+                case 4: locvar = in4; break;
+                case 5: locvar = in5; break;
+                case 6: locvar = in6; break;
+                case 7: locvar = in7; break;
+            }
+
+            value += s_data_start[ptr++] = locvar;
             ptr = ptr % filter_size;
 
-            if (z < depth - radius)
+            switch (preFetCnt) 
             {
-                data[x + y * width + (z + radius) * width * height] = value * invers;
+                case 0: out0 = value * invers; break;
+                case 1: out1 = value * invers; break;
+                case 2: out2 = value * invers; break;
+                case 3: out3 = value * invers; break;
+                case 4: out4 = value * invers; break;
+                case 5: out5 = value * invers; break;
+                case 6: out6 = value * invers; break;
+                case 7: out7 = value * invers; break;
             }
+
+            if (preFetCnt == 7)
+            {
+                if (z < depth - radius - 7)
+                {
+                    data[x + y * width + (z + radius) * width * height] = out7;
+                    data[x + y * width + (z + 1 + radius) * width * height] = out6;
+                    data[x + y * width + (z + 2 + radius) * width * height] = out5;
+                    data[x + y * width + (z + 3 + radius) * width * height] = out4;
+                    data[x + y * width + (z + 4 + radius) * width * height] = out3;
+                    data[x + y * width + (z + 5 + radius) * width * height] = out2;
+                    data[x + y * width + (z + 6 + radius) * width * height] = out1;
+                    data[x + y * width + (z + 7 + radius) * width * height] = out0;
+                }
+                else if (z < depth - radius - 6)
+                {
+                    data[x + y * width + (z + radius) * width * height] = out7;
+                    data[x + y * width + (z + 1 + radius) * width * height] = out6;
+                    data[x + y * width + (z + 2 + radius) * width * height] = out5;
+                    data[x + y * width + (z + 3 + radius) * width * height] = out4;
+                    data[x + y * width + (z + 4 + radius) * width * height] = out3;
+                    data[x + y * width + (z + 5 + radius) * width * height] = out2;
+                    data[x + y * width + (z + 6 + radius) * width * height] = out1;
+                }
+                else if (z < depth - radius - 5)
+                {
+                    data[x + y * width + (z + radius) * width * height] = out7;
+                    data[x + y * width + (z + 1 + radius) * width * height] = out6;
+                    data[x + y * width + (z + 2 + radius) * width * height] = out5;
+                    data[x + y * width + (z + 3 + radius) * width * height] = out4;
+                    data[x + y * width + (z + 4 + radius) * width * height] = out3;
+                    data[x + y * width + (z + 5 + radius) * width * height] = out2;
+                }
+                else if (z < depth - radius - 4)
+                {
+                    data[x + y * width + (z + radius) * width * height] = out7;
+                    data[x + y * width + (z + 1 + radius) * width * height] = out6;
+                    data[x + y * width + (z + 2 + radius) * width * height] = out5;
+                    data[x + y * width + (z + 3 + radius) * width * height] = out4;
+                    data[x + y * width + (z + 4 + radius) * width * height] = out3;
+                }
+                else if (z < depth - radius - 3)
+                {
+                    data[x + y * width + (z + radius) * width * height] = out7;
+                    data[x + y * width + (z + 1 + radius) * width * height] = out6;
+                    data[x + y * width + (z + 2 + radius) * width * height] = out5;
+                    data[x + y * width + (z + 3 + radius) * width * height] = out4;
+                }
+                else if (z < depth - radius - 2)
+                {
+                    data[x + y * width + (z + radius) * width * height] = out7;
+                    data[x + y * width + (z + 1 + radius) * width * height] = out6;
+                    data[x + y * width + (z + 2 + radius) * width * height] = out5;
+                }
+                else if (z < depth - radius - 1)
+                {
+                    data[x + y * width + (z + radius) * width * height] = out7;
+                    data[x + y * width + (z + 1 + radius) * width * height] = out6;
+                }
+                else if (z < depth - radius)
+                {
+                    data[x + y * width + (z + radius) * width * height] = out7;
+                }
+                
+            }
+
+            // if (z < depth - radius)
+            // {
+            //     data[x + y * width + (z + radius) * width * height] = value * invers;
+            // }
         }
+
+        if (preFetCnt == 6)
+        {
+            data[x + y * width + (radius) * width * height] = out6;
+            data[x + y * width + (1 + radius) * width * height] = out5;
+            data[x + y * width + (2 + radius) * width * height] = out4;
+            data[x + y * width + (3 + radius) * width * height] = out3;
+            data[x + y * width + (4 + radius) * width * height] = out2;
+            data[x + y * width + (5 + radius) * width * height] = out1;
+            data[x + y * width + (6 + radius) * width * height] = out0;
+        }
+        else if (preFetCnt == 5)
+        {
+            data[x + y * width + (radius) * width * height] = out5;
+            data[x + y * width + (1 + radius) * width * height] = out4;
+            data[x + y * width + (2 + radius) * width * height] = out3;
+            data[x + y * width + (3 + radius) * width * height] = out2;
+            data[x + y * width + (4 + radius) * width * height] = out1;
+            data[x + y * width + (5 + radius) * width * height] = out0;
+        }
+        else if (preFetCnt == 4)
+        {
+            data[x + y * width + (radius) * width * height] = out4;
+            data[x + y * width + (1 + radius) * width * height] = out3;
+            data[x + y * width + (2 + radius) * width * height] = out2;
+            data[x + y * width + (3 + radius) * width * height] = out1;
+            data[x + y * width + (4 + radius) * width * height] = out0;
+        }
+        else if (preFetCnt == 3)
+        {
+            data[x + y * width + (radius) * width * height] = out3;
+            data[x + y * width + (1 + radius) * width * height] = out2;
+            data[x + y * width + (2 + radius) * width * height] = out1;
+            data[x + y * width + (3 + radius) * width * height] = out0;
+        }
+        else if (preFetCnt == 2)
+        {
+            data[x + y * width + (radius) * width * height] = out2;
+            data[x + y * width + (1 + radius) * width * height] = out1;
+            data[x + y * width + (2 + radius) * width * height] = out0;
+        }
+        else if (preFetCnt == 1)
+        {
+            data[x + y * width + (radius) * width * height] = out1;
+            data[x + y * width + (1 + radius) * width * height] = out0;
+        }
+        else if (preFetCnt == 0)
+        {
+            data[x + y * width + (radius) * width * height] = out0;
+        }
+
         for (int z = radius; z--;)
         {
             //value -= data[x + y * width + (z + radius + 1) * width * height];
