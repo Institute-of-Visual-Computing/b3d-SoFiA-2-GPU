@@ -4038,8 +4038,8 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 			}
 		}
 	}
-	
 
+	//exit(0);
 	
 	return;
 }

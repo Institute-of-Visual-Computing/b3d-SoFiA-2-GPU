@@ -647,11 +647,11 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     dim3 gridSizeMS((width + blockSizeMS.x - 1) / blockSizeMS.x,
                     (height + blockSizeMS.y - 1) / blockSizeMS.y);
 
-    dim3 blockSizeX(32,32);
-    dim3 gridSizeX(1,(height + 7) / 8);
+    dim3 blockSizeX(32,16);
+    dim3 gridSizeX(1,(height + 1) / 2, 2);
 
     dim3 blockSizeY(32,32);
-    dim3 gridSizeY((width + 7) / 8,1);
+    dim3 gridSizeY((width + 7) / 8,1, 2);
 
     dim3 blockSizeZ(16,16);
     dim3 gridSizeZ((width + blockSizeZ.x - 1) / blockSizeZ.x,
@@ -681,7 +681,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 {
                     printf("Starting Kernels\n");
 
-                    if (radius_boxcar > 0)
+                    if (radius_boxcar > 0 && true)
                     {
                         printf("Launching data copy, flux masking, NAN deletion and Boxcar Z…\n");
 
@@ -716,7 +716,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 if(radius_gauss > 0)
                 {
                     printf("Launching Gauss X…\n");
-                    g_filter_gauss_X_flt_new<<<gridSizeX, blockSizeX, (16 * width + 17 * radius_gauss) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
+                    g_filter_gauss_X_flt_new<<<gridSizeX, blockSizeX, (4 * width + 5 * radius_gauss) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
                     cudaDeviceSynchronize();
 
                     err = cudaGetLastError();
@@ -875,6 +875,68 @@ __global__ void g_copyData_setMaskedScale1_removeBlanks(float *data_box, float *
             index1 += ((width + 7) / 8) * height;
             z += 1;
         }
+    }
+}
+
+__global__ void g_copyData_setMaskedScale1_removeBlanks_filter_gX_bcZ_flt(float *data_box, float *data, char *maskData1, const size_t width, const size_t height, const size_t depth, const float value, const size_t radius_g, const size_t radius_bc, const size_t n_iter)
+{
+    const size_t localY = threadIdx.y / 8;
+    size_t y = blockIdx.y * 2 + localY;
+    const size_t x0 = threadIdx.x + blockDim.x * (threadIdx.y % 8);
+    size_t x = x0;
+    size_t z = blockIdx.z;
+
+    const size_t xPage = 8 * blockDim.x;
+
+    extern __shared__ float s_data_GX_flt_GnB[];
+    float *s_data_bc = s_data_GX_flt_GnB;
+    float *s_data_src = s_data_bc + width + radius_g * (1 + localY) + width * localY;
+    float *s_data_dst = s_data_src + width * 2 + radius_g * 2;
+
+    if (x0 == 0)
+    {
+        for (int i = radius_g; i--;)
+        {
+            *(s_data_GX_flt_GnB + i) = *(s_data_src + width + i) = *(s_data_dst + width + i) = 0.0f;
+        }
+    }
+
+    while (z < depth)
+    {
+        while (y < height && x < width)
+        {
+            *(s_data_src + x) = data[x + y * width + z * width * height];
+            x += xPage;
+        }
+        x = x0;
+        __syncthreads();
+
+        for (int i = n_iter; i--;)
+        {
+            while (y < height && x < width)
+            {
+                *(s_data_dst + x) = *(s_data_src + x);
+                for (int i = radius_g; i--;)
+                {
+                    *(s_data_dst + x) += *(s_data_src + x + (i + 1)) + *(s_data_src + x - (i + 1));
+                }
+                *(s_data_dst + x) /= (2 * radius_g + 1);
+                x += xPage;
+            }
+            x = x0;
+            float *tmp = s_data_src;
+            s_data_src = s_data_dst;
+            s_data_dst = tmp;
+            __syncthreads();
+        }
+
+        while (y < height && x < width)
+        {
+            data[x + y * width + z * width * height] = *(s_data_src + x);
+            x += xPage;
+        }
+        x = x0;
+        z+=gridDim.z;
     }
 }
 
@@ -1294,23 +1356,23 @@ __global__ void g_filter_gauss_X_flt(float *data, const size_t width, const size
 
 __global__ void g_filter_gauss_X_flt_new(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius, const size_t n_iter)
 {
-    const size_t localY = threadIdx.y / 4;
-    const size_t y = blockIdx.y * 8 + localY;
-    const size_t x0 = threadIdx.x + blockDim.x * (threadIdx.y % 4);
+    const size_t localY = threadIdx.y / 8;
+    size_t y = blockIdx.y * 2 + localY;
+    const size_t x0 = threadIdx.x + blockDim.x * (threadIdx.y % 8);
     size_t x = x0;
-    size_t z = 0;
+    size_t z = blockIdx.z;
 
-    const size_t xPage = 4 * blockDim.x;
+    const size_t xPage = 8 * blockDim.x;
 
-    extern __shared__ float s_data_GY_flt_new[];
-    float *s_data_src = s_data_GY_flt_new + radius * (1 + localY) + width * localY;
-    float *s_data_dst = s_data_src + width * 8 + radius * 8;
+    extern __shared__ float s_data_GX_flt_new[];
+    float *s_data_src = s_data_GX_flt_new + radius * (1 + localY) + width * localY;
+    float *s_data_dst = s_data_src + width * 2 + radius * 2;
 
     if (x0 == 0)
     {
         for (int i = radius; i--;)
         {
-            *(s_data_GY_flt_new + i) = *(s_data_src + width + i) = *(s_data_dst + width + i) = 0.0f;
+            *(s_data_GX_flt_new + i) = *(s_data_src + width + i) = *(s_data_dst + width + i) = 0.0f;
         }
     }
 
@@ -1349,7 +1411,7 @@ __global__ void g_filter_gauss_X_flt_new(float *data, const size_t width, const 
             x += xPage;
         }
         x = x0;
-        ++z;
+        z+=gridDim.z;
     }
 }
 
@@ -1415,9 +1477,9 @@ __global__ void g_filter_gauss_Y_flt_new(float *data, const size_t width, const 
 {
     const size_t localX = threadIdx.x % 8;
     const size_t x = blockIdx.x * 8 + localX;
-    const size_t y0 = threadIdx.y * 4 + threadIdx.x / 8;
+    const size_t y0 = blockIdx.y * (height / (gridDim.y)) + threadIdx.y * 4 + threadIdx.x / 8;
     size_t y = y0;
-    size_t z = 0;
+    size_t z = blockIdx.z;
 
     const size_t yPage = 4 * blockDim.y;
 
@@ -1468,7 +1530,7 @@ __global__ void g_filter_gauss_Y_flt_new(float *data, const size_t width, const 
             y += yPage;
         }
         y = y0;
-        ++z;
+        z += gridDim.z;        
     }
 }
 
