@@ -37,6 +37,9 @@ void GPU_test_flag_sources();
 
 void GPU_test_cpy_msk_1_to_8();
 
+void GPU_test_transpose();
+
+
 void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const double rms, const size_t cadence, const int range, const double threshold);
 
 // copies data into data_box. Values are set to zero where they are NaN
@@ -114,6 +117,8 @@ __global__ void g_DataCube_stat_mad_flt_2(float *data, float *data_box, size_t s
 __global__ void g_std_dev_val_flt(float *data, float *data_dst_duo, const size_t size, const float value, const size_t cadence, const int range);
 
 __global__ void g_std_dev_val_flt_final_step(float *data_duo);
+
+__global__ void g_DataCube_transpose_inplace_flt(float *data, const size_t width, const size_t height, const size_t depth);
 
 
 __device__ void d_filter_boxcar_1d_flt(float *data, float *data_copy, const size_t size, const size_t filter_radius, const size_t jump);

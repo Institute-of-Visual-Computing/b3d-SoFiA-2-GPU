@@ -3949,7 +3949,9 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 	//GPU_test_median();
 	//GPU_test_Gauss_Y();
 	//GPU_test_Boxcar_Z();
+	//GPU_test_transpose();
 	//printf("RMS: %.3e\n", rms);
+
 	//exit(1);
 
 	if (useGPU)

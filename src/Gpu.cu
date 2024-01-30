@@ -435,6 +435,75 @@ void GPU_test_flag_sources()
     printf("Finished GPU\n");
 }
 
+void GPU_test_transpose()
+{
+    float data[64 * 4];
+
+    for (int i = 0; i < 64 * 4; i++) data[i] = i;
+
+    printf("Matrix to transpose:");
+
+	for (int i = 0 ; i < 64 * 4; i+=32)
+    {
+        if (i % 128 == 0) printf("\n");
+        printf("%g \t%g \t%g \t%g \t%g \t%g \t%g \t%g\t\t", data[i+0], data[i+1], data[i+2], data[i+3], data[i+4], data[i+5], data[i+6], data[i+7]);
+        printf("%g \t%g \t%g \t%g \t%g \t%g \t%g \t%g\n", data[i+8], data[i+9], data[i+10], data[i+11], data[i+12], data[i+13], data[i+14], data[i+15]);
+        printf("%g \t%g \t%g \t%g \t%g \t%g \t%g \t%g\t\t", data[i+16], data[i+17], data[i+18], data[i+19], data[i+20], data[i+21], data[i+22], data[i+23]);
+        printf("%g \t%g \t%g \t%g \t%g \t%g \t%g \t%g\n", data[i+24], data[i+25], data[i+26], data[i+27], data[i+28], data[i+29], data[i+30], data[i+31]);
+    }
+
+	printf("\n");
+
+    float *d_data;
+
+    cudaMalloc((void**)&d_data, 64 * 4 * sizeof(float));
+
+    cudaMemcpy(d_data, data, 64 * 4 * sizeof(float), cudaMemcpyHostToDevice);
+
+    cudaError_t err = cudaGetLastError();
+
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error at memcpy: %s\n", cudaGetErrorString(err));  
+    }
+
+    cudaDeviceSynchronize();
+
+    dim3 blockSize(32,16);
+    dim3 gridSize(1,1);
+
+    g_DataCube_transpose_inplace_flt<<<gridSize, blockSize>>>(d_data, 16, 16, 1);
+
+    cudaDeviceSynchronize();
+
+    err = cudaGetLastError();
+
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error after kernel: %s\n", cudaGetErrorString(err));  
+    }
+
+    cudaMemcpy(data, d_data, 64 * 4 * sizeof(float), cudaMemcpyDeviceToHost);
+
+    cudaDeviceSynchronize();
+
+    printf("Transposed Matrix:");
+
+	for (int i = 0 ; i < 64 * 4; i+=32)
+    {
+        if (i % 128 == 0) printf("\n");
+        printf("%g \t%g \t%g \t%g \t%g \t%g \t%g \t%g\t\t", data[i+0], data[i+1], data[i+2], data[i+3], data[i+4], data[i+5], data[i+6], data[i+7]);
+        printf("%g \t%g \t%g \t%g \t%g \t%g \t%g \t%g\n", data[i+8], data[i+9], data[i+10], data[i+11], data[i+12], data[i+13], data[i+14], data[i+15]);
+        printf("%g \t%g \t%g \t%g \t%g \t%g \t%g \t%g\t\t", data[i+16], data[i+17], data[i+18], data[i+19], data[i+20], data[i+21], data[i+22], data[i+23]);
+        printf("%g \t%g \t%g \t%g \t%g \t%g \t%g \t%g\n", data[i+24], data[i+25], data[i+26], data[i+27], data[i+28], data[i+29], data[i+30], data[i+31]);
+    }
+
+	printf("\n");
+
+    cudaFree(d_data);
+}
+
+
 void GPU_test_cpy_msk_1_to_8()
 {
     u_int8_t data[4] = {1,3,255,128+32+4+1};
@@ -647,6 +716,10 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     dim3 gridSizeMS((width + blockSizeMS.x - 1) / blockSizeMS.x,
                     (height + blockSizeMS.y - 1) / blockSizeMS.y);
 
+    dim3 blockSizeM1(32,16);
+    dim3 gridSizeM1((width + blockSizeM1.x - 1) / blockSizeM1.x,
+                    (height + blockSizeM1.y - 1) / blockSizeM1.y);
+
     dim3 blockSizeX(32,16);
     dim3 gridSizeX(1,(height + 1) / 2, 2);
 
@@ -656,6 +729,9 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     dim3 blockSizeZ(16,16);
     dim3 gridSizeZ((width + blockSizeZ.x - 1) / blockSizeZ.x,
                     (height + blockSizeZ.y - 1) / blockSizeZ.y);
+
+    dim3 blockSizeT(32, 16);
+    dim3 gridSizeT();
 
 
     dim3 blockSizeNoise(1024);
@@ -755,7 +831,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 }
 
                 printf("Starting Kernels for Mask\n");
-                g_addBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, width, height, depth);
+                g_addBlanks<<<gridSizeM1, blockSizeM1>>>(d_data_box, d_data, width, height, depth);
 
                 g_std_dev_val_flt<<<gridSizeNoise, blockSizeNoise, 1024 * 2 * sizeof(float)>>>(d_data_box, d_data_duo, data_size, 0.0f, cadence, range);
                 cudaDeviceSynchronize();
@@ -771,7 +847,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 //printf("Final noise: %.3e\n\n", noise[0]);
 
                 //g_Mask8<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_original_mask, width, height, depth, threshold, d_data_duo, 1);
-                g_Mask1<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_mask_data, width, height, depth, threshold, d_data_duo, 1);
+                g_Mask1<<<gridSizeM1, blockSizeM1>>>(d_data_box, d_mask_data, width, height, depth, threshold, d_data_duo, 1);
 
                 err = cudaGetLastError();
                 if (err != cudaSuccess)
@@ -798,7 +874,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 //printf("noise: %.3e\n\n", noise[0]);
 
                 //g_Mask8<<<gridSizeMS, blockSizeMS>>>(d_data, d_original_mask, width, height, depth, threshold, d_data_duo, 1);
-                g_Mask1<<<gridSizeMS, blockSizeMS>>>(d_data, d_mask_data, width, height, depth, threshold, d_data_duo, 1);
+                g_Mask1<<<gridSizeM1, blockSizeM1>>>(d_data, d_mask_data, width, height, depth, threshold, d_data_duo, 1);
                 cudaDeviceSynchronize();
 
                 err = cudaGetLastError();
@@ -1947,14 +2023,14 @@ __global__ void g_Mask1(float *data_box, char *maskData1, const size_t width, co
         {
             result = (!(__float_as_int(fabs(data_box[index]) - threshold * (*rms_smooth)) >> 31)) << (7 - (threadIdx.x % 8));
 
-            __syncwarp();
+            //__syncwarp();
 
             for (int offset = 1; offset < 8; offset *= 2)
             {
                 result |= __shfl_down_sync(0xffffffff, result, offset);
             }
 
-            __syncwarp();
+            //__syncwarp();
 
             if (threadIdx.x % 8 == 0) {maskData1[index1] |= result;}
             result = 0;
@@ -2858,7 +2934,7 @@ __global__ void g_std_dev_val_flt(float *data, float *data_dst_duo, const size_t
     {
         if (threadIdx.x % counter == 0)
         {
-            if (*(s_data_sdf_start + counter) < 0.0f) {atomicAdd(data_dst_duo + 2, 1);}
+            //if (*(s_data_sdf_start + counter) < 0.0f) {atomicAdd(data_dst_duo + 2, 1);}
             *s_data_sdf_start += *(s_data_sdf_start + counter);
             *(s_data_sdf_start + 1) += *(s_data_sdf_start + 1 + counter);
         }
@@ -2876,6 +2952,53 @@ __global__ void g_std_dev_val_flt(float *data, float *data_dst_duo, const size_t
 __global__ void g_std_dev_val_flt_final_step(float *data_duo)
 {
     *data_duo = sqrt(*data_duo / *(data_duo + 1));
+}
+
+__global__ void g_DataCube_transpose_inplace_flt(float *data, const size_t width, const size_t height, const size_t depth)
+{
+    const size_t x0 = blockIdx.x * 32 + 8 * (threadIdx.y % 4);
+    const size_t y0 = blockIdx.y * 32 + 8 * (threadIdx.y / 4);
+
+    const size_t localX = threadIdx.x % 4;
+    const size_t localY = threadIdx.x / 4;
+
+    const size_t xt = x0 + localX;
+    const size_t yt = y0 + localY;
+
+    const size_t xb = y0 + localX;
+    const size_t yb = x0 + localY;
+
+    size_t z = 0;
+
+    float topVal1;
+    float topVal2;
+
+    float botVal1;
+    float botVal2;
+
+    if (xt >= width || yt >= height) {return;}
+
+    if (x0 >= y0)
+    {
+        topVal1 = data[xt + (4 * (threadIdx.x / 16)) + yt * width];
+        topVal2 = data[xt + (4 * (1 - (threadIdx.x / 16))) + yt * width];
+
+        botVal1 = data[xb + (4 * (threadIdx.x / 16)) + yb * width];
+        botVal2 = data[xb + (4 * (1 - (threadIdx.x / 16))) + yb * width];
+
+        topVal1 = __shfl_sync(0xffffffff, topVal1, localX * 4 + localY % 4, 16);
+        botVal1 = __shfl_sync(0xffffffff, botVal1, localX * 4 + localY % 4, 16);
+
+        topVal2 = __shfl_sync(0xffffffff, topVal2, 16 * (1 - (threadIdx.x / 16)) + localX * 4 + localY % 4);
+        botVal2 = __shfl_sync(0xffffffff, botVal2, 16 * (1 - (threadIdx.x / 16)) + localX * 4 + localY % 4);
+
+        data[xt + (4 * (threadIdx.x / 16)) + yt * width] = botVal1;
+        data[xt + (4 * (1 - (threadIdx.x / 16))) + yt * width] = botVal2;
+
+        data[xb + (4 * (threadIdx.x / 16)) + yb * width] = topVal1;
+        data[xb + (4 * (1 - (threadIdx.x / 16))) + yb * width] = topVal2;
+    }
+
 }
 
 __device__ void d_filter_boxcar_1d_flt(float *data, float *data_copy, const size_t size, const size_t filter_radius, const size_t jump)
