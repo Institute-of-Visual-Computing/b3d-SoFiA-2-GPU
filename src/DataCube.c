@@ -3912,8 +3912,8 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 {
 	bool useGPU = true;
 
-	//GPU_test_cpy_msk_1_to_8();
-	//exit(0);
+	GPU_test_median();
+	exit(0);
 
 	// Sanity checks
 	check_null(self);
@@ -3949,10 +3949,10 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 	//GPU_test_median();
 	//GPU_test_Gauss_Y();
 	//GPU_test_Boxcar_Z();
-	//GPU_test_transpose();
+	GPU_test_transpose();
 	//printf("RMS: %.3e\n", rms);
 
-	//exit(1);
+	exit(0);
 
 	if (useGPU)
 	{
@@ -4041,7 +4041,7 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 		}
 	}
 
-	//exit(0);
+	exit(0);
 	
 	return;
 }

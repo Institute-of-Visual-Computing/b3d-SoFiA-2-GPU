@@ -118,6 +118,10 @@ __global__ void g_std_dev_val_flt(float *data, float *data_dst_duo, const size_t
 
 __global__ void g_std_dev_val_flt_final_step(float *data_duo);
 
+__global__ void g_mad_val_flt(float *data, float *data_dst_arr, const size_t size, const float value, const size_t cadence, const int range);
+
+__global__ void g_mad_val_flt_final_step(float *data);
+
 __global__ void g_DataCube_transpose_inplace_flt(float *data, const size_t width, const size_t height, const size_t depth);
 
 
