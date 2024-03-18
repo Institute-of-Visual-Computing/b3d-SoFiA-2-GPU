@@ -3910,10 +3910,7 @@ PRIVATE void DataCube_get_xyz(const DataCube *self, const size_t index, size_t *
 
 PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double threshold, const double maskScaleXY, const noise_stat method, const int range, const int scaleNoise, const noise_stat snStatistic, const int snRange, const size_t snWindowXY, const size_t snWindowZ, const size_t snGridXY, const size_t snGridZ, const bool snInterpol, const time_t start_time, const clock_t start_clock)
 {
-	bool useGPU = true;
-
-	GPU_test_median();
-	exit(0);
+	bool useGPU = false;
 
 	// Sanity checks
 	check_null(self);
@@ -3945,27 +3942,43 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 	else                              rms = DataCube_stat_gauss(self, cadence, range);
 
 	//GPU_test_current();
-	//GPU_test_sdt_dev((float*)self->data, self->data_size, cadence, range);
-	//GPU_test_median();
+	//GPU_test_sdt_dev((float*)self->data, self->data_size, cadence, 0);
+	//GPU_test_median(self->data, self->data_size);
 	//GPU_test_Gauss_Y();
 	//GPU_test_Boxcar_Z();
-	GPU_test_transpose();
+	//GPU_test_transpose();
+	//GPU_test_hist_lone();
+	GPU_test_hist(self->data, self->data_size, cadence, 0);
 	//printf("RMS: %.3e\n", rms);
 
 	exit(0);
 
 	if (useGPU)
 	{
+		struct timespec my_start_time;
+		struct timespec my_end_time;
+		gettimeofday(&my_start_time,NULL);
+
 		char *mask1 = malloc(((self->axis_size[0] + 7) / 8) * self->axis_size[1] * self->axis_size[2] * sizeof(char));
 
-		GPU_DataCube_filter_flt(self->data, mask1, self->data_size, self->axis_size, kernels_spat, kernels_spec, maskScaleXY, rms, cadence, range, threshold);
+		GPU_DataCube_filter_flt(self->data, mask1, self->data_size, self->axis_size, kernels_spat, kernels_spec, maskScaleXY, method, rms, cadence, range, threshold);
 
 		DataCube_copy_mask1_to_8(maskCube, mask1);
+
+		gettimeofday(&my_end_time,NULL);
+		printf("Starttime was: %lu\n", 1000000 * my_start_time.tv_sec + my_start_time.tv_nsec);
+		printf("GPU Took: %lu ns\n", 1000000 * my_end_time.tv_sec + my_end_time.tv_nsec - (1000000 * my_start_time.tv_sec + my_start_time.tv_nsec));
+		printf("GPU Took in Seconds: %lu\n", my_end_time.tv_sec - my_start_time.tv_sec);
+		printf("Endtime was: %lu\n", 1000000 * my_end_time.tv_sec + my_end_time.tv_nsec);
 
 		free(mask1);
 	}
 	else
 	{
+		struct timespec my_start_time;
+		struct timespec my_end_time;
+		gettimeofday(&my_start_time,NULL);
+
 		// Run S+C finder for all smoothing kernels
 		for(size_t i = 0; i < Array_dbl_get_size(kernels_spat); ++i)
 		{
@@ -4039,6 +4052,12 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 				timestamp(start_time, start_clock);
 			}
 		}
+
+		gettimeofday(&my_end_time,NULL);
+		printf("Starttime was: %lu\n", 1000000 * my_start_time.tv_sec + my_start_time.tv_nsec);
+		printf("CPU Took: %lu ns\n", 1000000 * my_end_time.tv_sec + my_end_time.tv_nsec - (1000000 * my_start_time.tv_sec + my_start_time.tv_nsec));
+		printf("CPU Took in Seconds: %lu\n", my_end_time.tv_sec - my_start_time.tv_sec);
+		printf("Endtime was: %lu\n", 1000000 * my_end_time.tv_sec + my_end_time.tv_nsec);
 	}
 
 	exit(0);

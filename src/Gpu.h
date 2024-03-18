@@ -18,6 +18,7 @@ extern "C" {
 #include "Array_dbl.h"
 #include "Array_siz.h"
 #include "statistics_dbl.h"
+#include "DataCube.h"
 
 void GPU_test_current();
 
@@ -29,7 +30,7 @@ void GPU_test_Boxcar_Z();
 
 void GPU_test_sdt_dev(float *data, size_t size, size_t cadence, const int range);
 
-void GPU_test_median();
+void GPU_test_median(float *data, size_t size);
 
 void GPU_test_copy_originalMask();
 
@@ -39,8 +40,12 @@ void GPU_test_cpy_msk_1_to_8();
 
 void GPU_test_transpose();
 
+void GPU_test_hist_lone();
 
-void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const double rms, const size_t cadence, const int range, const double threshold);
+void GPU_test_hist(float *data, size_t size, size_t cadence, const int range);
+
+
+void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const noise_stat method, const double rms, const size_t cadence, const int range, const double threshold);
 
 // copies data into data_box. Values are set to zero where they are NaN
 __global__ void g_copyData_removeBlanks(float *data_box, float *data, const size_t width, const size_t height, const size_t depth);
@@ -118,9 +123,15 @@ __global__ void g_std_dev_val_flt(float *data, float *data_dst_duo, const size_t
 
 __global__ void g_std_dev_val_flt_final_step(float *data_duo);
 
-__global__ void g_mad_val_flt(float *data, float *data_dst_arr, const size_t size, const float value, const size_t cadence, const int range);
+__global__ void g_mad_val_flt(float *data, float *data_dst_arr, unsigned int *counter, const size_t size, const size_t max_size, const float value, const size_t cadence, const int range);
 
-__global__ void g_mad_val_flt_final_step(float *data);
+__global__ void g_mad_val_flt_final_step(float *data, unsigned int *max_size);
+
+__global__ void g_mad_val_hist_flt(float *data, const size_t size, unsigned int *bins, unsigned int *total_count, const float value, const size_t cadence, const int range, const unsigned int precision, const float min_flt, const float max_flt);
+
+__global__ void g_mad_val_hist_flt_cpy_nth_bin(float *data, const size_t size, float *data_box, unsigned int *bins, unsigned int *total_count, unsigned int *counter, const float value, const size_t cadence, const int range, const unsigned int precision, const float min_flt, const float max_flt);
+
+__global__ void g_mad_val_hist_flt_final_step(float *data, const unsigned int *sizePtr, unsigned int *total_count, unsigned int *bins);
 
 __global__ void g_DataCube_transpose_inplace_flt(float *data, const size_t width, const size_t height, const size_t depth);
 

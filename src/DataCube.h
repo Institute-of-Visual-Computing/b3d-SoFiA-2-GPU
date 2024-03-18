@@ -52,6 +52,7 @@
 #include "Header.h"
 #include "WCS.h"
 #include "Parameter.h"
+#include "time.h"
 
 enum {DESTROY, PRESERVE};
 typedef enum {NOISE_STAT_STD, NOISE_STAT_MAD, NOISE_STAT_GAUSS, NOISE_STAT_MEAN, NOISE_STAT_MEDIAN} noise_stat;
