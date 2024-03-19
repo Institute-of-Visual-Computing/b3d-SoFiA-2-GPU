@@ -88,6 +88,8 @@ __global__ void g_Mask8(float *data_box, char *maskData8, const size_t width, co
 
 __global__ void g_Mask1(float *data_box, char *maskData1, const size_t width, const size_t height, const size_t depth, const double threshold, float *rms_smooth, const int8_t value);
 
+__global__ void g_find_max_min(float *data_box, const size_t size, float *min_out, float *max_out);
+
 __global__ void g_FlagSources(float *mask32, uint32_t *bbCounter, uint32_t *bbPtr, const size_t width, const size_t height, const size_t depth, const size_t radius_z);
 
 __global__ void g_MergeSourcesFirstPass(float *mask32, uint32_t *bbPtr, const size_t width, const size_t height, const size_t depth, const size_t radius_x, const size_t radius_y, const size_t radius_z);
@@ -127,9 +129,9 @@ __global__ void g_mad_val_flt(float *data, float *data_dst_arr, unsigned int *co
 
 __global__ void g_mad_val_flt_final_step(float *data, unsigned int *max_size);
 
-__global__ void g_mad_val_hist_flt(float *data, const size_t size, unsigned int *bins, unsigned int *total_count, const float value, const size_t cadence, const int range, const unsigned int precision, const float min_flt, const float max_flt);
+__global__ void g_mad_val_hist_flt(float *data, const size_t size, unsigned int *bins, unsigned int *total_count, const float value, const size_t cadence, const int range, const unsigned int precision, const float *min_flt, const float *max_flt);
 
-__global__ void g_mad_val_hist_flt_cpy_nth_bin(float *data, const size_t size, float *data_box, unsigned int *bins, unsigned int *total_count, unsigned int *counter, const float value, const size_t cadence, const int range, const unsigned int precision, const float min_flt, const float max_flt);
+__global__ void g_mad_val_hist_flt_cpy_nth_bin(float *data, const size_t size, float *data_box, unsigned int *bins, unsigned int *total_count, unsigned int *counter, const float value, const size_t cadence, const int range, const unsigned int precision, const float *min_flt, const float *max_flt);
 
 __global__ void g_mad_val_hist_flt_final_step(float *data, const unsigned int *sizePtr, unsigned int *total_count, unsigned int *bins);
 
@@ -146,6 +148,10 @@ __device__ inline size_t get_index( const size_t x, const size_t y, const size_t
 }
 
 __device__ void d_sort_arr_flt(float *arr, size_t size);
+
+__device__ static float atomicMax(float* address, float val);
+
+__device__ static float atomicMin(float* address, float val);
 
 void sort_arr_flt(float *arr, size_t size);
 

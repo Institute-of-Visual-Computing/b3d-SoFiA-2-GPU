@@ -3910,7 +3910,7 @@ PRIVATE void DataCube_get_xyz(const DataCube *self, const size_t index, size_t *
 
 PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double threshold, const double maskScaleXY, const noise_stat method, const int range, const int scaleNoise, const noise_stat snStatistic, const int snRange, const size_t snWindowXY, const size_t snWindowZ, const size_t snGridXY, const size_t snGridZ, const bool snInterpol, const time_t start_time, const clock_t start_clock)
 {
-	bool useGPU = false;
+	bool useGPU = true;
 
 	// Sanity checks
 	check_null(self);
@@ -3948,10 +3948,10 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 	//GPU_test_Boxcar_Z();
 	//GPU_test_transpose();
 	//GPU_test_hist_lone();
-	GPU_test_hist(self->data, self->data_size, cadence, 0);
+	//GPU_test_hist(self->data, self->data_size, cadence, range);
 	//printf("RMS: %.3e\n", rms);
 
-	exit(0);
+	//exit(0);
 
 	if (useGPU)
 	{
@@ -4060,7 +4060,7 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 		printf("Endtime was: %lu\n", 1000000 * my_end_time.tv_sec + my_end_time.tv_nsec);
 	}
 
-	exit(0);
+	//exit(0);
 	
 	return;
 }

@@ -372,12 +372,19 @@ void GPU_test_hist(float *data, size_t size, size_t cadence, const int range)
 
     float *d_data;
     float *d_data_box;
+    float *d_min;
+    float *d_max;
     unsigned int *d_bins;
     unsigned int *d_bin_total_values;
     unsigned int *d_counter;
 
+    float min = INFINITY;
+    float max = -INFINITY;
+
     cudaMalloc((void**)&d_data, size * sizeof(float));
     cudaMalloc((void**)&d_data_box, size * sizeof(float));
+    cudaMalloc((void**)&d_min,sizeof(float));
+    cudaMalloc((void**)&d_max,sizeof(float));
     cudaMalloc((void**)&d_bins, precision * sizeof(unsigned int));
     cudaMalloc((void**)&d_bin_total_values, sizeof(unsigned int));
     cudaMalloc((void**)&d_counter, sizeof(unsigned int));
@@ -387,6 +394,8 @@ void GPU_test_hist(float *data, size_t size, size_t cadence, const int range)
     cudaMemset(d_counter, 0, sizeof(unsigned int));
 
     cudaMemcpy(d_data, data, size * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_min, &min, sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_max, &max, sizeof(float), cudaMemcpyHostToDevice);
 
     if (err != cudaSuccess)
     {
@@ -398,18 +407,35 @@ void GPU_test_hist(float *data, size_t size, size_t cadence, const int range)
     dim3 blockSize(1024);
     dim3 gridSize(32);
 
-    float min = min_flt(data, size);
-    float max = max_flt(data, size);
+    min = min_flt(data, size);
+    max = max_flt(data, size);
+
+    //cudaMemcpy(d_min, &min, sizeof(float), cudaMemcpyHostToDevice);
+    //cudaMemcpy(d_max, &max, sizeof(float), cudaMemcpyHostToDevice);
 
     printf("Min : %f\nMax: %f\n", min, max);
 
     unsigned int nth = (size / 2) / cadence;
 
-    g_mad_val_hist_flt<<<gridSize, blockSize, precision * sizeof(unsigned int)>>>(d_data, size, d_bins, d_bin_total_values, 0.0, cadence, range, precision, min, max);
+    g_find_max_min<<<1024, 1024>>>(d_data, size, d_min, d_max);
 
     cudaDeviceSynchronize();
 
-    g_mad_val_hist_flt_cpy_nth_bin<<<gridSize, blockSize, blockSize.x * sizeof(float)>>>(d_data, size, d_data_box, d_bins, d_bin_total_values, d_counter, 0.0, cadence, range, precision,  min, max);
+    min = 0;
+    max = 0;
+
+    cudaMemcpy(&min, d_min, sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&max, d_max, sizeof(float), cudaMemcpyDeviceToHost);
+
+    cudaDeviceSynchronize();
+
+    printf("Min : %f\nMax: %f\n", min, max);
+
+    g_mad_val_hist_flt<<<gridSize, blockSize, precision * sizeof(unsigned int)>>>(d_data, size, d_bins, d_bin_total_values, 0.0, cadence, range, precision, d_min, d_max);
+
+    cudaDeviceSynchronize();
+
+    g_mad_val_hist_flt_cpy_nth_bin<<<gridSize, blockSize, blockSize.x * sizeof(float)>>>(d_data, size, d_data_box, d_bins, d_bin_total_values, d_counter, 0.0, cadence, range, precision, d_min, d_max);
 
     g_mad_val_hist_flt_final_step<<<1,1>>>(d_data_box, d_counter, d_bin_total_values, d_bins);
 
@@ -425,11 +451,11 @@ void GPU_test_hist(float *data, size_t size, size_t cadence, const int range)
         printf("Cuda error after back cpy %s\n", cudaGetErrorString(err));  
     }
 
-    printf("Bins: ");
+    // printf("Bins: ");
 
-	for (int i = 0 ; i < precision; i++){printf("%u ", bins[i]);}
+	// for (int i = 0 ; i < precision; i++){printf("%u ", bins[i]);}
     
-    printf("\n");
+    // printf("\n");
 
     printf("Counter: %u\n", counter);
 }
@@ -715,9 +741,17 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     float *d_data;
     float *d_data_box;
     float *d_data_duo;
-    float *d_median_arr;
-    unsigned int *d_med_counter;
     char *d_mask_data;
+
+    // For STAT_MAD
+    float *d_data_min;
+    float *d_data_max;
+    float *d_median_arr;
+    float *d_median_arr_swap;
+    unsigned int mad_precision = 1024;
+    unsigned int *d_bins;
+    unsigned int *d_med_total_values;
+    unsigned int *d_med_counter;
 
     // size_t free_bytes, total_bytes;
     // cudaError_t cuda_status = cudaMemGetInfo(&free_bytes, &total_bytes);
@@ -793,8 +827,20 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
         printf("med Array size is: %lu with range: %i\n", medArraySize, range);
         printf("Allocating %fMB for median calculation\n", medArraySize * sizeof(float) / (1024.0f * 1024.0f));
         cudaMalloc((void**)&d_median_arr, medArraySize * sizeof(float));
+        cudaMalloc((void**)&d_median_arr_swap, medArraySize * sizeof(float));
+        cudaMalloc((void**)&d_med_total_values, sizeof(unsigned int));
         cudaMalloc((void**)&d_med_counter, sizeof(unsigned int));
+        cudaMalloc((void**)&d_bins, mad_precision * sizeof(unsigned int));
+        cudaMalloc((void**)&d_data_min, sizeof(float));
+        cudaMalloc((void**)&d_data_max, sizeof(float));
+        
+        cudaMemset(d_med_total_values, 0, sizeof(unsigned int));
         cudaMemset(d_med_counter, 0, sizeof(unsigned int));
+
+        float inf = INFINITY;
+        float ninf = -INFINITY;
+        cudaMemcpy(d_data_min, &inf, sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_data_max, &ninf, sizeof(float), cudaMemcpyHostToDevice);
 
         err = cudaGetLastError();
         if (err != cudaSuccess)
@@ -874,6 +920,19 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     dim3 blockSizeNoise(1024);
     dim3 gridSizeNoise(1024);
 
+    if (method == NOISE_STAT_MAD)
+    {
+        g_find_max_min<<<512, 1024>>>(d_data, data_size, d_data_min, d_data_max);
+    }
+
+    err = cudaGetLastError();
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error after finding min and max: %s\n", cudaGetErrorString(err));    
+    }
+
+    cudaDeviceSynchronize();
+
     for(size_t i = 0; i < Array_dbl_get_size(kernels_spat); ++i)
 	{
         for(size_t j = 0; j < Array_siz_get_size(kernels_spec); ++j)
@@ -881,7 +940,9 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
             cudaMemset(d_data_duo, 0, 2 * sizeof(float));
             if (method == NOISE_STAT_MAD)
             {
+                cudaMemset(d_bins, 0, mad_precision * sizeof(unsigned int));
                 cudaMemset(d_med_counter, 0, sizeof(unsigned int));
+                cudaMemset(d_med_total_values, 0, sizeof(unsigned int));
             }
 
             if (Array_dbl_get(kernels_spat, i) || Array_siz_get(kernels_spec, j))
@@ -997,11 +1058,29 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 }
                 else if (method == NOISE_STAT_MAD)
                 {
-                    g_mad_val_flt<<<1, blockSizeNoise, (blockSizeNoise.x + 1) * sizeof(float)>>>(d_data_box, d_median_arr, d_med_counter, data_size, (range == 0) ? (data_size / cadence) : (data_size / (2 * cadence)), 0.0f, cadence, range);
-                    unsigned int count;
-                    cudaMemcpy(&count, d_med_counter, sizeof(unsigned int), cudaMemcpyDeviceToHost);
-                    printf("Median values count: %u\n", count);
-                    g_mad_val_flt_final_step<<<1,1024>>>(d_median_arr, d_med_counter);
+                    // g_mad_val_flt<<<1, blockSizeNoise, (blockSizeNoise.x + 1) * sizeof(float)>>>(d_data_box, d_median_arr, d_med_counter, data_size, (range == 0) ? (data_size / cadence) : (data_size / (2 * cadence)), 0.0f, cadence, range);
+                    // unsigned int count;
+                    // cudaMemcpy(&count, d_med_counter, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+                    // printf("Median values count: %u\n", count);
+                    // g_mad_val_flt_final_step<<<1,1024>>>(d_median_arr, d_med_counter);
+                    // cudaMemcpy(d_data_duo, d_median_arr, 1 * sizeof(float), cudaMemcpyDeviceToDevice);
+                    printf("Starting MAD\n");
+                    g_mad_val_hist_flt<<<gridSizeNoise, blockSizeNoise, mad_precision * sizeof(unsigned int)>>>(d_data_box, data_size, d_bins, d_med_total_values, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
+                    g_mad_val_hist_flt_cpy_nth_bin<<<gridSizeNoise, blockSizeNoise, blockSizeNoise.x * sizeof(float)>>>(d_data_box, data_size, d_median_arr, d_bins, d_med_total_values, d_med_counter, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max); 
+
+                    // unsigned int med_counter;
+                    // cudaMemcpy(&med_counter, d_med_counter, sizeof(unsigned int),cudaMemcpyDeviceToHost);
+                    // cudaMemset(d_bins, 0, mad_precision * sizeof(unsigned int));
+                    // cudaMemset(d_med_counter, 0, sizeof(unsigned int));
+                    // cudaMemset(d_med_total_values, 0, sizeof(unsigned int));
+
+                    // g_mad_val_hist_flt<<<gridSizeNoise, blockSizeNoise, mad_precision * sizeof(unsigned int)>>>(d_median_arr, med_counter, d_bins, d_med_total_values, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
+                    // g_mad_val_hist_flt_cpy_nth_bin<<<gridSizeNoise, blockSizeNoise, blockSizeNoise.x * sizeof(float)>>>(d_data_box, data_size, d_median_arr, d_bins, d_med_total_values, d_med_counter, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
+                    
+                    g_mad_val_hist_flt_final_step<<<1,1>>>(d_median_arr, d_med_counter, d_med_total_values, d_bins);
+
+                    cudaDeviceSynchronize();
+
                     cudaMemcpy(d_data_duo, d_median_arr, 1 * sizeof(float), cudaMemcpyDeviceToDevice);
                 }
 
@@ -1035,33 +1114,43 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 }
                 else if (method == NOISE_STAT_MAD)
                 {
+                    // cudaDeviceSynchronize();
+                    // g_mad_val_flt<<<1, blockSizeNoise, (blockSizeNoise.x + 1) * sizeof(float)>>>(d_data_box, d_median_arr, d_med_counter, data_size, ((range == 0) ? (data_size / cadence) : (data_size / (2 * cadence))), 0.0f, cadence, range);
+                    // cudaDeviceSynchronize();
+                    // unsigned int count;
+                    // cudaMemcpy(&count, d_med_counter, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+                    // printf("Median values count: %u\n", count);
+                    // err = cudaGetLastError();
+                    // if (err != cudaSuccess)
+                    // {
+                    //     printf("Cuda error after first noise step: %s\n", cudaGetErrorString(err));    
+                    // }
+                    // cudaDeviceSynchronize();
+                    // g_mad_val_flt_final_step<<<1,1024>>>(d_median_arr, d_med_counter);
+                    // err = cudaGetLastError();
+                    // if (err != cudaSuccess)
+                    // {
+                    //     printf("Cuda error after second noise step: %s\n", cudaGetErrorString(err));    
+                    // }
+                    // cudaDeviceSynchronize();
+                    // cudaMemcpy(d_data_duo, d_median_arr, 1 * sizeof(float), cudaMemcpyDeviceToDevice);
+                    // cudaDeviceSynchronize();
+
+                    printf("Starting MAD\n");
+                    g_mad_val_hist_flt<<<gridSizeNoise, blockSizeNoise, mad_precision * sizeof(unsigned int)>>>(d_data_box, data_size, d_bins, d_med_total_values, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
+                    g_mad_val_hist_flt_cpy_nth_bin<<<gridSizeNoise, blockSizeNoise, blockSizeNoise.x * sizeof(float)>>>(d_data_box, data_size, d_median_arr, d_bins, d_med_total_values, d_med_counter, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
+                    g_mad_val_hist_flt_final_step<<<1,1>>>(d_median_arr, d_med_counter, d_med_total_values, d_bins);
+
                     cudaDeviceSynchronize();
-                    g_mad_val_flt<<<1, blockSizeNoise, (blockSizeNoise.x + 1) * sizeof(float)>>>(d_data_box, d_median_arr, d_med_counter, data_size, ((range == 0) ? (data_size / cadence) : (data_size / (2 * cadence))), 0.0f, cadence, range);
-                    cudaDeviceSynchronize();
-                    unsigned int count;
-                    cudaMemcpy(&count, d_med_counter, sizeof(unsigned int), cudaMemcpyDeviceToHost);
-                    printf("Median values count: %u\n", count);
-                    err = cudaGetLastError();
-                    if (err != cudaSuccess)
-                    {
-                        printf("Cuda error after first noise step: %s\n", cudaGetErrorString(err));    
-                    }
-                    cudaDeviceSynchronize();
-                    g_mad_val_flt_final_step<<<1,1024>>>(d_median_arr, d_med_counter);
-                    err = cudaGetLastError();
-                    if (err != cudaSuccess)
-                    {
-                        printf("Cuda error after second noise step: %s\n", cudaGetErrorString(err));    
-                    }
-                    cudaDeviceSynchronize();
+
                     cudaMemcpy(d_data_duo, d_median_arr, 1 * sizeof(float), cudaMemcpyDeviceToDevice);
-                    cudaDeviceSynchronize();
                 }
 
                 err = cudaGetLastError();
                 if (err != cudaSuccess)
                 {
-                    printf("Cuda error after first noise calc: %s\n", cudaGetErrorString(err));    
+                    printf("Cuda error after first noise calc: %s\n", cudaGetErrorString(err));
+                    exit(1);
                 }
 
                 float noise[2] = {0,0};
@@ -1093,6 +1182,17 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     cudaFree(d_mask_data);
     cudaFree(d_data_duo);
 
+    if(method == NOISE_STAT_MAD)
+    {
+        cudaFree(d_data_min);
+        cudaFree(d_data_max);
+        cudaFree(d_median_arr);
+        cudaFree(d_median_arr_swap);
+        cudaFree(d_bins);
+        cudaFree(d_med_total_values);
+        cudaFree(d_med_counter);
+    }
+
     printf("Finished GPU\n");
 }
 
@@ -1123,7 +1223,11 @@ __global__ void g_addBlanks(float *data_box, float* data, const size_t width, co
 
     while (index < width * height * depth)
     {
-        if(IS_NAN(data[index])) data_box[index] = NAN;
+        if(IS_NAN(data[index])) 
+        {
+            data_box[index] = NAN;
+            printf("NaN found\n");
+        }
         index += width * height;
     }
 }
@@ -2217,7 +2321,10 @@ __global__ void g_Mask1(float *data_box, char *maskData1, const size_t width, co
     {
         while (z < depth)
         {
+
             result = (!(__float_as_int(fabs(data_box[index]) - threshold * (*rms_smooth)) >> 31)) << (7 - (threadIdx.x % 8));
+
+            if (IS_NAN(data_box[index])) printf("NaN result: %i\n", result);
 
             //__syncwarp();
 
@@ -2234,6 +2341,36 @@ __global__ void g_Mask1(float *data_box, char *maskData1, const size_t width, co
             index1 += ((width + 7) / 8) * height;
             z += 1;
         }
+    }
+}
+
+__global__ void g_find_max_min(float *data_box, const size_t size, float *min_out, float *max_out)
+{
+    const size_t index = blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t num_threads = gridDim.x * blockDim.x;
+    float *ptr = data_box + size + index;
+
+    float local_min = INFINITY;
+    float local_max = -INFINITY;
+
+    while (ptr > data_box + num_threads)
+    {
+        ptr -= num_threads;
+        float value = *ptr;
+        local_min = min(value, local_min);
+        local_max = max(value, local_max);
+    }
+
+    for (int offset = 32; offset /= 2;)
+    {
+        local_min = min(local_min, __shfl_down_sync(0xffffffff, local_min, offset));
+        local_max = max(local_max, __shfl_down_sync(0xffffffff, local_max, offset));
+    }
+
+    if (threadIdx.x % 32 == 0)
+    {
+        atomicMin(min_out, local_min);
+        atomicMax(max_out, local_max);
     }
 }
 
@@ -3369,16 +3506,21 @@ __global__ void g_mad_val_flt_final_step(float *data, unsigned int *sizePtr)
     }
 }
 
-__global__ void g_mad_val_hist_flt(float *data, const size_t size, unsigned int *bins, unsigned int *total_count, const float value, const size_t cadence, const int range, const unsigned int precision, const float min_flt, const float max_flt)
+__global__ void g_mad_val_hist_flt(float *data, const size_t size, unsigned int *bins, unsigned int *total_count, const float value, const size_t cadence, const int range, const unsigned int precision, const float *min_flt, const float *max_flt)
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int thread_count = blockDim.x * gridDim.x;
 
     extern __shared__ unsigned int s_data_madf_hist[];
+    
+    if (threadIdx.x < precision) // needs at least as many threads as bins
+    {
+        s_data_madf_hist[threadIdx.x] = 0;
+    }
 
     const float *ptr = data + size + index * cadence;
     const float *ptr2 = data + cadence * thread_count - 1;
-    const float my_max = range == 0 ? max(fabs(min_flt - value), fabs(max_flt - value)) : (range < 0 ? max(fabs(min_flt - value), fabs(0 - value)) : max(fabs(max_flt - value), fabs(0 - value)));
+    const float my_max = range == 0 ? max(fabs(*min_flt - value), fabs(*max_flt - value)) : (range < 0 ? max(fabs(*min_flt - value), fabs(0 - value)) : max(fabs(*max_flt - value), fabs(0 - value)));
     const float bucket_size = my_max / precision;
 
     while (ptr > ptr2)
@@ -3400,7 +3542,7 @@ __global__ void g_mad_val_hist_flt(float *data, const size_t size, unsigned int 
     }
 }
 
-__global__ void g_mad_val_hist_flt_cpy_nth_bin(float *data, const size_t size, float *data_box, unsigned int *bins, unsigned int *total_count, unsigned int *counter, const float value, const size_t cadence, const int range, const unsigned int precision, const float min_flt, const float max_flt)
+__global__ void g_mad_val_hist_flt_cpy_nth_bin(float *data, const size_t size, float *data_box, unsigned int *bins, unsigned int *total_count, unsigned int *counter, const float value, const size_t cadence, const int range, const unsigned int precision, const float *min_flt, const float *max_flt)
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int thread_count = blockDim.x * gridDim.x;
@@ -3412,15 +3554,11 @@ __global__ void g_mad_val_hist_flt_cpy_nth_bin(float *data, const size_t size, f
 
     const float *ptr = data + size + index * cadence;
     const float *ptr2 = data + cadence * thread_count - 1;
-    const float my_max = range == 0 ? max(fabs(min_flt - value), fabs(max_flt - value)) : (range < 0 ? max(fabs(min_flt - value), fabs(0 - value)) : max(fabs(max_flt - value), fabs(0 - value)));
+    const float my_max = range == 0 ? max(fabs(*min_flt - value), fabs(*max_flt - value)) : (range < 0 ? max(fabs(*min_flt - value), fabs(0 - value)) : max(fabs(*max_flt - value), fabs(0 - value)));
     const float bucket_size = my_max / precision;
 
     int selected_bin = 0;
     for (int j = *bins; j < *total_count / 2 + 1 && selected_bin < precision; j += bins[++selected_bin]) {}
-
-    const float bin_min = bucket_size * selected_bin;
-    const float bin_max = bucket_size * (selected_bin + 1);
-
 
     bool test = true;
     int offset = -1;
@@ -3512,9 +3650,7 @@ __global__ void g_mad_val_hist_flt_final_step(float *data, const unsigned int *s
 		if(ptr < i) m = j;
 	}
 	
-	*data = *ptr;
-
-    //printf("Median: %.3e\n", *data);
+	*data = MAD_TO_STD * *ptr;
 }
 
 __global__ void g_DataCube_transpose_inplace_flt(float *data, const size_t width, const size_t height, const size_t depth)
@@ -3667,6 +3803,30 @@ __device__ void d_sort_arr_flt(float *arr, size_t size)
             --j;
         }
     }
+}
+
+__device__ static float atomicMax(float* address, float val)
+{
+    int* address_as_i = (int*) address;
+    int old = *address_as_i, assumed;
+    do {
+        assumed = old;
+        old = ::atomicCAS(address_as_i, assumed,
+            __float_as_int(::fmaxf(val, __int_as_float(assumed))));
+    } while (assumed != old);
+    return __int_as_float(old);
+}
+
+__device__ static float atomicMin(float* address, float val)
+{
+    int* address_as_i = (int*) address;
+    int old = *address_as_i, assumed;
+    do {
+        assumed = old;
+        old = ::atomicCAS(address_as_i, assumed,
+            __float_as_int(::fminf(val, __int_as_float(assumed))));
+    } while (assumed != old);
+    return __int_as_float(old);
 }
 
 void sort_arr_flt(float *arr, size_t size)
