@@ -44,6 +44,10 @@ void GPU_test_hist_lone();
 
 void GPU_test_hist(float *data, size_t size, size_t cadence, const int range);
 
+void GPU_test_gausfit(float *data, size_t size, size_t cadence, const int range);
+
+void GPU_gaufit(const float *data, const size_t size, float *sigma_out, const size_t cadence, const int range);
+
 
 void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const noise_stat method, const double rms, const size_t cadence, const int range, const double threshold);
 
@@ -88,7 +92,7 @@ __global__ void g_Mask8(float *data_box, char *maskData8, const size_t width, co
 
 __global__ void g_Mask1(float *data_box, char *maskData1, const size_t width, const size_t height, const size_t depth, const double threshold, float *rms_smooth, const int8_t value);
 
-__global__ void g_find_max_min(float *data_box, const size_t size, float *min_out, float *max_out);
+__global__ void g_find_max_min(const float *data_box, const size_t size, const size_t cadence, float *min_out, float *max_out);
 
 __global__ void g_FlagSources(float *mask32, uint32_t *bbCounter, uint32_t *bbPtr, const size_t width, const size_t height, const size_t depth, const size_t radius_z);
 
@@ -134,6 +138,14 @@ __global__ void g_mad_val_hist_flt(float *data, const size_t size, unsigned int 
 __global__ void g_mad_val_hist_flt_cpy_nth_bin(float *data, const size_t size, float *data_box, unsigned int *bins, unsigned int *total_count, unsigned int *counter, const float value, const size_t cadence, const int range, const unsigned int precision, const float *min_flt, const float *max_flt);
 
 __global__ void g_mad_val_hist_flt_final_step(float *data, const unsigned int *sizePtr, unsigned int *total_count, unsigned int *bins);
+
+__global__ void g_create_histogram_flt(const float *data, const size_t size, const int range, unsigned int *histogram, const size_t n_bins, const float *data_min, const float *data_max, const size_t cadence);
+
+__global__ void g_scale_max_min_with_second_moment_flt(const unsigned int *histogram, const size_t n_bins, const int range, float *data_min, float *data_max);
+
+__global__ void g_calc_sigma_flt(const unsigned int *histogram, const size_t n_bins, const int range, const float *data_min, const float *data_max, float *sigma_out);
+
+__global__ void g_gaufit_flt(const float *data, const size_t size, unsigned int *histogram, float *sigma_out, const size_t cadence, const int range, const float *min, const float *max);
 
 __global__ void g_DataCube_transpose_inplace_flt(float *data, const size_t width, const size_t height, const size_t depth);
 

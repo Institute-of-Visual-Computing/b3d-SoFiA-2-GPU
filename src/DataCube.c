@@ -3949,6 +3949,7 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 	//GPU_test_transpose();
 	//GPU_test_hist_lone();
 	//GPU_test_hist(self->data, self->data_size, cadence, range);
+	//GPU_test_gausfit(self->data, self->data_size, cadence, range);
 	//printf("RMS: %.3e\n", rms);
 
 	//exit(0);

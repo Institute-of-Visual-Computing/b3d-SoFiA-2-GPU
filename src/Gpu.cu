@@ -417,7 +417,7 @@ void GPU_test_hist(float *data, size_t size, size_t cadence, const int range)
 
     unsigned int nth = (size / 2) / cadence;
 
-    g_find_max_min<<<1024, 1024>>>(d_data, size, d_min, d_max);
+    g_find_max_min<<<1024, 1024>>>(d_data, size, cadence, d_min, d_max);
 
     cudaDeviceSynchronize();
 
@@ -439,10 +439,13 @@ void GPU_test_hist(float *data, size_t size, size_t cadence, const int range)
 
     g_mad_val_hist_flt_final_step<<<1,1>>>(d_data_box, d_counter, d_bin_total_values, d_bins);
 
-    cudaMemcpy(bins, d_bins, precision * sizeof(unsigned int), cudaMemcpyDeviceToHost);
+    float median;
+    cudaMemcpy(&median, d_data_box, sizeof(float), cudaMemcpyDeviceToHost);
 
     unsigned int counter;
     cudaMemcpy(&counter, d_counter, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+
+    cudaMemcpy(bins, d_bins, precision * sizeof(unsigned int), cudaMemcpyDeviceToHost);
 
     cudaDeviceSynchronize();
 
@@ -451,6 +454,8 @@ void GPU_test_hist(float *data, size_t size, size_t cadence, const int range)
         printf("Cuda error after back cpy %s\n", cudaGetErrorString(err));  
     }
 
+    printf("GPU Median: %.3e\n", median / MAD_TO_STD);
+
     // printf("Bins: ");
 
 	// for (int i = 0 ; i < precision; i++){printf("%u ", bins[i]);}
@@ -458,6 +463,114 @@ void GPU_test_hist(float *data, size_t size, size_t cadence, const int range)
     // printf("\n");
 
     printf("Counter: %u\n", counter);
+}
+
+void GPU_test_gausfit(float *data, size_t size, size_t cadence, const int range)
+{
+    float *d_data;
+    float *d_sigma_out;
+
+    cudaMalloc((void**)&d_data, size * sizeof(float));
+    cudaMalloc((void**)&d_sigma_out, sizeof(float));
+
+    cudaMemcpy(d_data, data, size * sizeof(float), cudaMemcpyHostToDevice);
+
+    printf("True GaussFit: %.3e\n", gaufit_flt(data, size, cadence, range));
+
+    GPU_gaufit(d_data, size, d_sigma_out, cadence, range);
+
+    // cudaError_t err = cudaGetLastError();
+
+    // if (err != cudaSuccess)
+    // {
+    //     printf("Cuda error at start: %s\n", cudaGetErrorString(err));  
+    // }
+
+    // //size_t size = 11;
+    // unsigned int precision = 101;
+    
+    // //float data[size] = {20,30,3,4,5,6,7,8,9,10,11};
+    // unsigned int bins[precision];
+
+    // //for (int i = 0; i < size; i++) {data[i] = size - i;}
+
+    // printf("True GaussFit: %.3e\n", gaufit_flt(data, size, cadence, range));
+
+    // float *d_data;
+    // unsigned int *d_histogram;
+    // float *d_min;
+    // float *d_max;
+    // float *d_sigma;
+
+    // float min = INFINITY;
+    // float max = -INFINITY;
+
+    // cudaMalloc((void**)&d_data, size * sizeof(float));
+    // cudaMalloc((void**)&d_histogram, precision * sizeof(unsigned int));
+    // cudaMalloc((void**)&d_min,sizeof(float));
+    // cudaMalloc((void**)&d_max,sizeof(float));
+    // cudaMalloc((void**)&d_sigma,sizeof(float));
+
+    // cudaMemcpy(d_data, data, size * sizeof(float), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_min, &min, sizeof(float), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_max, &max, sizeof(float), cudaMemcpyHostToDevice);
+
+    // cudaMemset(d_histogram, 0, precision * sizeof (unsigned int));
+
+    // if (err != cudaSuccess)
+    // {
+    //     printf("Cuda error after Memalloc: %s\n", cudaGetErrorString(err));  
+    // }
+
+    // cudaDeviceSynchronize();
+
+    // dim3 blockSize(1024);
+    // dim3 gridSize(32);
+
+    // min = min_flt(data, size);
+    // max = max_flt(data, size);
+
+    // //cudaMemcpy(d_min, &min, sizeof(float), cudaMemcpyHostToDevice);
+    // //cudaMemcpy(d_max, &max, sizeof(float), cudaMemcpyHostToDevice);
+
+    // printf("Min CPU: %f\nMax CPU: %f\n", min, max);
+
+    // g_find_max_min<<<1024, 1024>>>(d_data, size, cadence, d_min, d_max);
+
+    // cudaDeviceSynchronize();
+
+    // min = 0;
+    // max = 0;
+
+    // cudaMemcpy(&min, d_min, sizeof(float), cudaMemcpyDeviceToHost);
+    // cudaMemcpy(&max, d_max, sizeof(float), cudaMemcpyDeviceToHost);
+
+    // cudaDeviceSynchronize();
+
+    // printf("Min GPU: %f\nMax GPU: %f\n", min, max);
+
+    // g_gaufit_flt<<<1, 32>>>(d_data, size, d_histogram, d_sigma, cadence, range, d_min, d_max);
+
+    // cudaDeviceSynchronize();
+
+    // float sigma;
+
+    // cudaMemcpy(&sigma, d_sigma, sizeof(float), cudaMemcpyDeviceToHost);
+
+    // cudaDeviceSynchronize();
+
+    // if (err != cudaSuccess)
+    // {
+    //     printf("Cuda error after back cpy %s\n", cudaGetErrorString(err));  
+    // }
+
+    // // printf("Bins: ");
+
+	// // for (int i = 0 ; i < precision; i++){printf("%u ", bins[i]);}
+    
+    // // printf("\n");
+
+    // printf("GPU GaussFit: %.3e\n", sigma);
 }
 
 void GPU_test_flag_sources()
@@ -646,6 +759,70 @@ void GPU_test_transpose()
     cudaFree(d_data);
 }
 
+void GPU_gaufit(const float *d_data, const size_t size, float *d_sigma_out, const size_t cadence, const int range)
+{
+    // Determine maximum and minimum
+    float *data_min;
+	float *data_max;
+    unsigned int *histogram;
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error at start: %s\n", cudaGetErrorString(err));    
+    }
+
+    cudaMalloc((void**)&data_min,sizeof(float));
+    cudaMalloc((void**)&data_max,sizeof(float));
+
+    float inf = INFINITY;
+    float ninf = -INFINITY;
+    cudaMemcpy(data_min, &inf, sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(data_max, &ninf, sizeof(float), cudaMemcpyHostToDevice);
+
+    g_find_max_min<<<1024, 1024>>>(d_data, size, 1, data_min, data_max);
+	// Create initial histogram
+	const size_t n_bins = 101;
+
+    cudaMalloc((void**)&histogram, n_bins * sizeof(unsigned int));
+    cudaMemset(histogram, 0, n_bins * sizeof(unsigned int));
+
+    cudaDeviceSynchronize();
+    err = cudaGetLastError();
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error after malloc: %s\n", cudaGetErrorString(err));    
+    }
+
+    g_create_histogram_flt<<<1024, 1024, n_bins * sizeof(unsigned int)>>>(d_data, size, range, histogram, n_bins, data_min, data_max, cadence);
+
+    cudaDeviceSynchronize();
+    err = cudaGetLastError();
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error after first hist creation: %s\n", cudaGetErrorString(err));    
+    }
+
+    g_scale_max_min_with_second_moment_flt<<<1, 32>>>(histogram, n_bins, range, data_min, data_max);
+    cudaDeviceSynchronize();
+    err = cudaGetLastError();
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error after moment scale: %s\n", cudaGetErrorString(err));    
+    }
+    
+    // Regenerate histogram with new scaling
+    cudaMemset(histogram, 0, n_bins * sizeof(unsigned int));
+    g_create_histogram_flt<<<1024, 1024, n_bins * sizeof(unsigned int)>>>(d_data, size, range, histogram, n_bins, data_min, data_max, cadence);
+    g_calc_sigma_flt<<<1, 32>>>(histogram, n_bins, range, data_min, data_max, d_sigma_out);
+
+    cudaDeviceSynchronize();
+    err = cudaGetLastError();
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error at End: %s\n", cudaGetErrorString(err));    
+    }
+}
 
 void GPU_test_cpy_msk_1_to_8()
 {
@@ -922,7 +1099,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
 
     if (method == NOISE_STAT_MAD)
     {
-        g_find_max_min<<<512, 1024>>>(d_data, data_size, d_data_min, d_data_max);
+        g_find_max_min<<<512, 1024>>>(d_data, data_size, cadence, d_data_min, d_data_max);
     }
 
     err = cudaGetLastError();
@@ -1083,6 +1260,10 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
 
                     cudaMemcpy(d_data_duo, d_median_arr, 1 * sizeof(float), cudaMemcpyDeviceToDevice);
                 }
+                else
+                {
+                    GPU_gaufit(d_data_box, data_size, d_data_duo, cadence, range);
+                }
 
                 float noise[2] = {0,0};
                 //cudaMemcpy(noise, d_data_duo, 2 * sizeof(float), cudaMemcpyDeviceToHost);
@@ -1144,6 +1325,10 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                     cudaDeviceSynchronize();
 
                     cudaMemcpy(d_data_duo, d_median_arr, 1 * sizeof(float), cudaMemcpyDeviceToDevice);
+                }
+                else
+                {
+                    GPU_gaufit(d_data_box, data_size, d_data_duo, cadence, range);
                 }
 
                 err = cudaGetLastError();
@@ -2344,18 +2529,18 @@ __global__ void g_Mask1(float *data_box, char *maskData1, const size_t width, co
     }
 }
 
-__global__ void g_find_max_min(float *data_box, const size_t size, float *min_out, float *max_out)
+__global__ void g_find_max_min(const float *data_box, const size_t size, const size_t cadence, float *min_out, float *max_out)
 {
     const size_t index = blockIdx.x * blockDim.x + threadIdx.x;
     const size_t num_threads = gridDim.x * blockDim.x;
-    float *ptr = data_box + size + index;
+    const float *ptr = data_box + size + index * cadence;
 
     float local_min = INFINITY;
     float local_max = -INFINITY;
 
-    while (ptr > data_box + num_threads)
+    while (ptr > data_box + num_threads * cadence)
     {
-        ptr -= num_threads;
+        ptr -= num_threads * cadence;
         float value = *ptr;
         local_min = min(value, local_min);
         local_max = max(value, local_max);
@@ -3651,6 +3836,395 @@ __global__ void g_mad_val_hist_flt_final_step(float *data, const unsigned int *s
 	}
 	
 	*data = MAD_TO_STD * *ptr;
+}
+
+__global__ void g_create_histogram_flt(const float *data, const size_t size, const int range, unsigned int *histogram, const size_t n_bins, const float *data_min, const float *data_max, const size_t cadence)
+{
+    size_t index = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t num_threads = gridDim.x * blockDim.x;
+    extern __shared__ unsigned int s_hist_flt[];
+
+    if (threadIdx.x < n_bins) s_hist_flt[threadIdx.x] = 0;
+
+    float local_min = *data_min;
+    float local_max = *data_max;
+
+    if(local_max < local_min)
+	{
+		if (blockIdx.x == 0 && threadIdx.x == 0) printf("Maximum(%f) is not greater than minimum(%f).\n", local_max, local_min);
+		return;
+	}
+	
+	// Determine data range
+	if(range < 0)
+	{
+		if(local_min >= 0.0)
+		{
+			if (blockIdx.x == 0 && threadIdx.x == 0) printf("Minimum is not less than zero.\n");
+			return;
+		}
+		local_max = 0.0;
+	}
+	else if(range > 0)
+	{
+		if(local_max <= 0.0)
+		{
+			if (blockIdx.x == 0 && threadIdx.x == 0) printf("Maximum is not greater than zero.\n");
+			return;
+		}
+		local_min = 0.0;
+	}
+	else
+	{
+		const float limit = fabs(local_min) < fabs(local_max) ? fabs(local_min) : fabs(local_max);
+		local_min = -limit;
+		local_max = limit;
+	}
+
+	// Basic setup
+	const float slope = (float)(n_bins - 1) / (local_max - local_min);
+	const float *ptr  = data + size + cadence * index;
+	const float tmp   = 0.5 - slope * local_min;  // The 0.5 is needed for correct rounding later on.
+
+    __syncthreads();
+	
+	// Generate histogram
+	while(ptr > data + cadence * num_threads)
+	{
+        ptr -= cadence * num_threads;
+		if(*ptr >= local_min && *ptr <= local_max)
+		{
+			size_t bin = (size_t)(slope * *ptr + tmp);
+			atomicAdd(s_hist_flt + bin, 1);
+		}
+	}
+
+    __syncthreads();
+
+    if (threadIdx.x < n_bins) {atomicAdd(histogram + threadIdx.x, s_hist_flt[threadIdx.x]);}
+}
+
+__global__ void g_scale_max_min_with_second_moment_flt(const unsigned int *histogram, const size_t n_bins, const int range, float *data_min, float *data_max)
+{
+    // Calculate second moment
+	float mom0 = 0.0;
+	float mom1 = 0.0;
+	float mom2 = 0.0;
+
+    const float inv_optimal_mom2 = 5.0 / n_bins;  // Require standard deviation to cover 1/5th of the histogram for optimal results
+	
+    // calculation split between threads of warp
+	for(size_t i = threadIdx.x; i < n_bins; i += blockDim.x)
+	{
+        // if (threadIdx.x == 0) printf("I: %lu Hist: %u\n", i, histogram[i]);
+		mom0 += histogram[i];
+		mom1 += histogram[i] * (size_t)i;
+	}
+
+    for (int offset = 16; offset > 0; offset /= 2)
+    {
+        mom0 += __shfl_down_sync(0xffffffff, mom0, offset);
+        mom1 += __shfl_down_sync(0xffffffff, mom1, offset);
+    }
+
+    mom0 = __shfl_sync(0xffffffff, mom0, 0);
+    mom1 = __shfl_sync(0xffffffff, mom1, 0);
+
+	mom1 /= mom0;
+	
+	for(size_t i = threadIdx.x; i < n_bins; i += blockDim.x) 
+    {
+        mom2 += histogram[i] * (mom1 - i) * (mom1 - i);
+    }
+
+    for (int offset = 16; offset > 0; offset /= 2)
+    {
+        mom2 += __shfl_down_sync(0xffffffff, mom2, offset);
+    }
+
+	mom2 = sqrt(mom2 / mom0);
+	
+    if (threadIdx.x == 0)
+    {
+        // Ensure that 2nd moment is equal to optimal_mom2 for optimal fitting
+        if(range < 0) 
+        {
+            *data_min *= mom2 * inv_optimal_mom2;
+            *data_max = 0.0;
+        }
+        else if(range > 0) 
+        {
+            *data_max *= mom2 * inv_optimal_mom2;
+            *data_min = 0.0;
+        }
+        else
+        {
+            const float limit = fabs(*data_min) < fabs(*data_max) ? fabs(*data_min) : fabs(*data_max);
+            *data_min = -limit * mom2 * inv_optimal_mom2;
+            *data_max = limit * mom2 * inv_optimal_mom2;
+        }
+    }
+}
+
+// expected to launch with only one warp and one block
+__global__ void g_calc_sigma_flt(const unsigned int *histogram, const size_t n_bins, const int range, const float *data_min, const float *data_max, float *sigma_out)
+{
+    // Fit Gaussian function using linear regression
+	// (excluding first and last point in case of edge effects)
+	float mean_x = 0.0;
+	float mean_y = 0.0;
+	size_t counter = 0;
+    
+    size_t origin = n_bins / 2;
+	if(range < 0) origin = n_bins - 1;
+	else if(range > 0) origin = 0;
+	
+	for(size_t i = threadIdx.x + 1; i < n_bins - 1; i += blockDim.x)
+	{
+		if(histogram[i])
+		{
+			long int ii = i - origin;
+			mean_x += (float)(ii * ii);
+			mean_y += log((float)(histogram[i]));
+            //printf("Hist at %lu: %u\n", i, histogram[i]);
+			++counter;
+		}
+	}
+
+    for (int offset = 32; offset /= 2;)
+    {
+        mean_x += __shfl_down_sync(0xffffffff, mean_x, offset);
+        mean_y += __shfl_down_sync(0xffffffff, mean_y, offset);
+        counter += __shfl_down_sync(0xffffffff, counter, offset);
+    }
+
+    mean_x = __shfl_sync(0xffffffff, mean_x, 0);
+    mean_y = __shfl_sync(0xffffffff, mean_y, 0);
+    counter = __shfl_sync(0xffffffff, counter, 0);
+	
+	mean_x /= counter;
+	mean_y /= counter;
+
+	float upper_sum = 0.0;
+	float lower_sum = 0.0;
+	
+	for(size_t i = threadIdx.x + 1; i < n_bins - 1; i += blockDim.x)
+	{
+		if(histogram[i])
+		{
+			long int ii = i - origin;
+			const float x = (float)(ii * ii);
+			const float y = log((float)(histogram[i]));
+			upper_sum += (x - mean_x) * (y - mean_y);
+			lower_sum += (x - mean_x) * (x - mean_x);
+		}
+	}
+
+    for (int offset = 32; offset /= 2;)
+    {
+        upper_sum += __shfl_down_sync(0xffffffff, upper_sum, offset);
+        lower_sum += __shfl_down_sync(0xffffffff, lower_sum, offset);
+    }
+	
+	// Determine standard deviation from slope
+    if (threadIdx.x == 0)
+    {
+        *sigma_out = sqrt(-0.5 * lower_sum / upper_sum) * (*data_max - *data_min) / (n_bins - 1);
+    }
+}
+
+// expected to launch with only one warp and one block
+__global__ void g_gaufit_flt(const float *data, const size_t size, unsigned int *histogram, float *sigma_out, const size_t cadence, const int range, const float *min, const float *max)
+{
+    if (threadIdx.x == 0) printf("Starting Gaussfit\n");
+	// Determine maximum and minimum
+	float data_max = *max;
+	float data_min = *min;
+	
+	if(data_min >= 0.0 || data_max <= 0.0)
+	{
+		if (threadIdx.x == 0) printf("Maximum is not greater than minimum.");
+		return;
+	}
+	
+	// Determine data range
+	if(range < 0)
+	{
+		if(data_min >= 0.0)
+		{
+			if (threadIdx.x == 0) printf("Minimum is not less than zero.");
+			return;
+		}
+		data_max = 0.0;
+	}
+	else if(range > 0)
+	{
+		if(data_max <= 0.0)
+		{
+			if (threadIdx.x == 0) printf("Maximum is not greater than zero.");
+			return;
+		}
+		data_min = 0.0;
+	}
+	else
+	{
+		const float limit = fabs(data_min) < fabs(data_max) ? fabs(data_min) : fabs(data_max);
+		data_min = -limit;
+		data_max = limit;
+	}
+
+    if (threadIdx.x == 0) printf("DataMin: %f\nDataMax: %f\n", data_min, data_max);
+	
+	// Create initial histogram
+	const size_t n_bins = 101;
+	size_t origin = n_bins / 2;
+	if(range < 0) origin = n_bins - 1;
+	else if(range > 0) origin = 0;
+	const float inv_optimal_mom2 = 5.0 / n_bins;  // Require standard deviation to cover 1/5th of the histogram for optimal results
+
+    if (threadIdx.x == 0) printf("Before hist\n");
+
+    if (threadIdx.x == 0)
+    {
+        cudaStream_t s;
+        cudaEvent_t t;
+        cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking);
+        //cudaEventCreate(&t);
+        g_create_histogram_flt<<<1024, 1024, n_bins * sizeof(unsigned int), s>>>(data, size, range, histogram, n_bins, &data_min, &data_max, cadence);
+        cudaEventRecord(t, s);
+        cudaStreamWaitEvent(s, t);
+    }
+
+    __syncthreads();
+	
+	// Calculate second moment
+	float mom0 = 0.0;
+	float mom1 = 0.0;
+	float mom2 = 0.0;
+	
+    // calculation split between threads of warp
+	for(size_t i = threadIdx.x; i < n_bins; i += blockDim.x)
+	{
+        //if (threadIdx.x == 0) printf("I: %lu Mom0: %f   Mom1: %f\n", i, mom0, mom1);
+		mom0 += histogram[i];
+		mom1 += histogram[i] * (float)i;
+	}
+
+    if (threadIdx.x == 0) printf("Mom0: %f\nMom1: %f\n", mom0, mom1);
+
+    __syncwarp();
+
+    for (int offset = 32; offset /= 2;)
+    {
+        mom0 += __shfl_down_sync(0xffffffff, mom0, offset);
+        mom1 += __shfl_down_sync(0xffffffff, mom1, offset);
+    }
+
+	mom1 /= mom0;
+
+    if (threadIdx.x == 0) printf("Mom0: %f\nMom1: %f\n", mom0, mom1);
+	
+	for(size_t i = threadIdx.x; i < n_bins; i += blockDim.x) 
+    {
+        mom2 += histogram[i] * (mom1 - i) * (mom1 - i);
+    }
+
+    __syncwarp();
+
+    for (int offset = 32; offset /= 2;)
+    {
+        mom2 += __shfl_down_sync(0xffffffff, mom2, offset);
+    }
+
+	mom2 = sqrt(mom2 / mom0);
+	
+	// Ensure that 2nd moment is equal to optimal_mom2 for optimal fitting
+	if(range < 0) data_min *= mom2 * inv_optimal_mom2;
+	else if(range > 0) data_max *= mom2 * inv_optimal_mom2;
+	else
+	{
+		data_min *= mom2 * inv_optimal_mom2;
+		data_max *= mom2 * inv_optimal_mom2;
+	}
+	
+	// Regenerate histogram with new scaling
+	if (threadIdx.x == 0)
+    {
+        cudaStream_t s;
+        cudaEvent_t t;
+        memset(histogram, 0, n_bins * sizeof(unsigned int));
+        //cudaEventCreate(&t);
+        g_create_histogram_flt<<<1024, 1024, n_bins * sizeof(unsigned int), s>>>(data, size, range, histogram, n_bins, &data_min, &data_max, cadence);
+        cudaEventRecord(t, s);
+        cudaStreamWaitEvent(NULL, t);
+    }
+
+    __syncthreads();
+	
+	// Fit Gaussian function using linear regression
+	// (excluding first and last point in case of edge effects)
+	float mean_x = 0.0;
+	float mean_y = 0.0;
+	size_t counter = 0;
+	
+	for(size_t i = threadIdx.x + 1; i < n_bins - 1; i += blockDim.x)
+	{
+		if(histogram[i])
+		{
+			long int ii = i - origin;
+			mean_x += (float)(ii * ii);
+			mean_y += log((float)(histogram[i]));
+			++counter;
+		}
+	}
+
+    if (threadIdx.x == 0) printf("mean_x: %f\nmean_y: %f\n", mean_x, mean_y);
+
+    __syncwarp();
+
+    for (int offset = 32; offset /= 2;)
+    {
+        mean_x += __shfl_down_sync(0xffffffff, mean_x, offset);
+        mean_y += __shfl_down_sync(0xffffffff, mean_y, offset);
+        counter += __shfl_down_sync(0xffffffff, counter, offset);
+    }
+
+    if (threadIdx.x == 0) printf("mean_x: %f\nmean_y: %f\n", mean_x, mean_y);
+	
+	mean_x /= counter;
+	mean_y /= counter;
+
+	float upper_sum = 0.0;
+	float lower_sum = 0.0;
+	
+	for(size_t i = threadIdx.x + 1; i < n_bins - 1; i += blockDim.x)
+	{
+		if(histogram[i])
+		{
+			long int ii = i - origin;
+			const float x = (float)(ii * ii);
+			const float y = log((float)(histogram[i]));
+			upper_sum += (x - mean_x) * (y - mean_y);
+			lower_sum += (x - mean_x) * (x - mean_x);
+		}
+	}
+
+    __syncwarp();
+
+    for (int offset = 32; offset /= 2;)
+    {
+        upper_sum += __shfl_down_sync(0xffffffff, upper_sum, offset);
+        lower_sum += __shfl_down_sync(0xffffffff, lower_sum, offset);
+    }
+
+    if (threadIdx.x == 0) printf("upper_sum: %f\nlower_sum: %f\n", upper_sum, lower_sum);
+	
+	// Determine standard deviation from slope
+    if (threadIdx.x == 0)
+    {
+        const float sigma = sqrt(-0.5 * lower_sum / upper_sum) * (data_max - data_min) / (n_bins - 1);
+        if (threadIdx.x == 0) printf("sigma: %.3e\n", sigma);
+    }
 }
 
 __global__ void g_DataCube_transpose_inplace_flt(float *data, const size_t width, const size_t height, const size_t depth)
