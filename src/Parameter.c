@@ -489,6 +489,7 @@ PUBLIC void Parameter_default(Parameter *self)
 	Parameter_set(self, "pipeline.verbose"         , "false");
 	Parameter_set(self, "pipeline.pedantic"        , "true");
 	Parameter_set(self, "pipeline.threads"         , "0");
+	Parameter_set(self, "pipeline.useGPU"          , "false");
 	
 	// Input
 	Parameter_set(self, "input.data"               , "");

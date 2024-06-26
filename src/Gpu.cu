@@ -1082,8 +1082,8 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     dim3 blockSizeX(32,16);
     dim3 gridSizeX(1,(height + 1) / 2, 2);
 
-    dim3 blockSizeY(32,16);
-    dim3 gridSizeY((width + 7) / 8,1, 2);
+    dim3 blockSizeY(32,8);
+    dim3 gridSizeY((width + 7) / 8,1, 8);
 
     dim3 blockSizeZ(16,16);
     dim3 gridSizeZ((width + blockSizeZ.x - 1) / blockSizeZ.x,
@@ -1201,7 +1201,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
 
                     printf("Launching Gauss Y…\n");
 
-                    g_filter_gauss_Y_flt_new<<<gridSizeY, blockSizeY, (16 * height + 24 * radius_gauss) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
+                    g_filter_gauss_Y_flt_new<<<gridSizeY, blockSizeY, (9 * height + 10 * radius_gauss) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
                     cudaDeviceSynchronize();
 
                     err = cudaGetLastError();
@@ -2036,8 +2036,8 @@ __global__ void g_filter_gauss_Y_flt(float *data, const size_t width, const size
 
 __global__ void g_filter_gauss_Y_flt_new(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius, const size_t n_iter)
 {
-    const size_t localX = threadIdx.x % 8;
-    const size_t x = blockIdx.x * 8 + localX;
+    const int localX = threadIdx.x % 8;
+    size_t x = blockIdx.x * 8 + localX;
     const size_t y0 = blockIdx.y * (height / (gridDim.y)) + threadIdx.y * 4 + threadIdx.x / 8;
     size_t y = y0;
     size_t z = blockIdx.z;
@@ -2045,53 +2045,97 @@ __global__ void g_filter_gauss_Y_flt_new(float *data, const size_t width, const 
     const size_t yPage = 4 * blockDim.y;
 
     extern __shared__ float s_data_GY_flt_new[];
-    float *s_data_src = s_data_GY_flt_new + radius * 8 + localX;
-    float *s_data_dst = s_data_src + height * 8 + radius * 8;
+    float *s_data_src = s_data_GY_flt_new + radius;
 
-    if (threadIdx.x < 8)
+    if (threadIdx.x < 9 && threadIdx.y == 0)
     {
         for (int i = radius; i--;)
         {
-            *(s_data_GY_flt_new + i * 8 + localX) = *(s_data_src + height * 8 + i * 8) = *(s_data_dst + height * 8 + i * 8) = 0.0f;
+            *(s_data_GY_flt_new + i) = *(s_data_GY_flt_new + height * (threadIdx.x + 1) + radius * (threadIdx.x + 1) + i) = 0.0f;
         }
     }
 
     while (z < depth)
     {
-        while (y < height && x < width)
+        while (x < width && y < height)
         {
-            *(s_data_src + y * 8) = data[x + y * width + z * width * height];
+            *(s_data_src + localX * (height + radius) + y) = data[x + y * width + z * width * height];
             y += yPage;
         }
         y = y0;
         __syncthreads();
 
-        for (int i = n_iter; i--;)
+        float *s_data_dst = s_data_src + height * 8 + radius * 8;
+
+        for (int i = 0; i < min(width - blockIdx.x * 8, (size_t)8); i++)
         {
-            while (y < height && x < width)
+            //if (z == 0 && threadIdx.x == 0 && threadIdx.y == 0) {printf("hi %lu\n", width - blockIdx.x * 8);}
+
+            float *src = s_data_src + i * (height + radius);
+            for (int j = n_iter; j--;)
             {
-                *(s_data_dst + y * 8) = *(s_data_src + y * 8);
-                for (int i = radius; i--;)
+                unsigned int index = threadIdx.y * blockDim.x + threadIdx.x;
+                while (index < height)
                 {
-                    *(s_data_dst + y * 8) += *(s_data_src + y * 8 + (i + 1) * 8) + *(s_data_src + y * 8 - ((i + 1) * 8));
+                    float tmp = src[index];
+                    for (int k = radius; k--;)
+                    {
+                        tmp += src[index + (k + 1)] + src[index - (k + 1)];
+                    }
+                    s_data_dst[index] = tmp / (2 * radius + 1);
+                    index += blockDim.x * blockDim.y;
                 }
-                *(s_data_dst + y * 8) /= 2 * radius + 1;
+                float *tmpPtr = src;
+                src = s_data_dst;
+                s_data_dst = tmpPtr;
+                __syncthreads();
+            }
+
+            // if (IS_ODD (n_iter))
+            // {
+            //     unsigned int index = threadIdx.y * blockDim.x + threadIdx.x;
+            //     while (index < height)
+            //     {
+            //         s_data_dst[index] = src[index];
+            //         index += blockDim.x * blockDim.y;
+            //     }
+            //     float *tmpPtr = src;
+            //     src = s_data_dst;
+            //     s_data_dst = tmpPtr;
+            //     __syncthreads();
+            // }
+        }
+
+        // if (true)
+        // {
+        //     while (x < width && y < height)
+        //     {
+        //         data[x + y * width + z * width * height] = *(s_data_src + localX * (height + radius) + y);
+        //         y += yPage;
+        //     }
+        //     y = y0;
+        // }
+
+        if (IS_EVEN(n_iter))
+        {
+            while (x < width && y < height)
+            {
+                data[x + y * width + z * width * height] = *(s_data_src + localX * (height + radius) + y);
                 y += yPage;
             }
             y = y0;
-            float *tmp = s_data_src;
-            s_data_src = s_data_dst;
-            s_data_dst = tmp;
-            __syncthreads();
         }
-
-        while (y < height && x < width)
+        else
         {
-            data[x + y * width + z * width * height] = *(s_data_src + y * 8);
-            y += yPage;
+            while (x < width && y < height)
+            {
+                data[x + y * width + z * width * height] = *(s_data_src + ((localX - 1 + 9) % 9) * (height + radius) + y);
+                y += yPage;
+            }
+            y = y0;
         }
-        y = y0;
-        z += gridDim.z;        
+        z += gridDim.z;
+        __syncthreads();
     }
 }
 
