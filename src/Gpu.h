@@ -60,7 +60,7 @@ __global__ void g_addBlanks(float *data_box, float* data, const size_t width, co
 __global__ void g_copyData_setMaskedScale1_removeBlanks(float *data_box, float *data, char *maskData1, const size_t width, const size_t height, const size_t depth, const float value);
 
 // copies data into data_box. While doing this data is masked by the mask data and set to their flux value where the mask is not zero. Values are set to zero where they are NaN
-__global__ void g_copyData_setMaskedScale1_removeBlanks_filter_boxcar_Z_flt(float *data_box, float *data, char *maskData1, const size_t width, const size_t height, const size_t depth, const float maskValue, const size_t radius);
+__global__ void g_copyData_setMaskedScale1_removeBlanks_filter_boxcar_Z_flt(float *data_box, float *data, char *maskData1, const unsigned short width, const unsigned short height, const unsigned short depth, const float maskValue, const size_t radius);
 
 __global__ void g_copyData_setMaskedScale1_removeBlanks_filter_gX_bcZ_flt(float *data_box, float *data, char *maskData1, const size_t width, const size_t height, const size_t depth, const float value, const size_t radius_g, const size_t radius_bc, const size_t n_iter);
 
@@ -90,7 +90,7 @@ __global__ void g_filter_XYZ_flt(float *data, const size_t width, const size_t h
 
 __global__ void g_Mask8(float *data_box, char *maskData8, const size_t width, const size_t height, const size_t depth, const double threshold, float *rms_smooth, const int8_t value);
 
-__global__ void g_Mask1(float *data_box, char *maskData1, const size_t width, const size_t height, const size_t depth, const double threshold, float *rms_smooth, const int8_t value);
+__global__ void g_Mask1(float *data_box, char *maskData1, const size_t width, const size_t height, const size_t depth, const double threshold, float *rms_smooth);
 
 __global__ void g_find_max_min(const float *data_box, const size_t size, const size_t cadence, float *min_out, float *max_out);
 
