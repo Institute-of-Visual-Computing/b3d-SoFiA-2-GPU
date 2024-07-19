@@ -1085,7 +1085,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     dim3 blockSizeXZ(128,1);
     dim3 gridSizeXZ(1,height);
 
-    dim3 blockSizeY(32,8);
+    dim3 blockSizeY(64,8);
     dim3 gridSizeY((width + 7) / 8,1, 8);
 
     dim3 blockSizeZ(256,1);
