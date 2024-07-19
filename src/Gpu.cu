@@ -1082,11 +1082,11 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     dim3 blockSizeX(32,16);
     dim3 gridSizeX(1,(height + 1) / 2, 2);
 
-    dim3 blockSizeXZ(128,1);
-    dim3 gridSizeXZ(1,height);
+    dim3 blockSizeXZ(256,1);
+    dim3 gridSizeXZ(1,height,8);
 
     dim3 blockSizeY(64,8);
-    dim3 gridSizeY((width + 7) / 8,1, 8);
+    dim3 gridSizeY((width + 7) / 8,1, 16);
 
     dim3 blockSizeZ(256,1);
     dim3 gridSizeZ((width + blockSizeZ.x - 1) / blockSizeZ.x,
@@ -1231,8 +1231,11 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 //     }
                 // }
 
-                printf("Starting Kernels for Mask\n");
-                g_addBlanks<<<gridSizeM1, blockSizeM1>>>(d_data_box, d_data, width, height, depth);
+                if (radius_gauss <= 0)
+                {
+                    printf("Starting Kernels for Mask\n");
+                    g_addBlanks<<<gridSizeM1, blockSizeM1>>>(d_data_box, d_data, width, height, depth);
+                }
 
                 if (method == NOISE_STAT_STD)
                 {
@@ -1713,7 +1716,8 @@ __global__ void g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new(float *data_sr
 {
     inline uint16_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const inline uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
-    inline uint32_t z = blockIdx.z * blockDim.z + threadIdx.z;
+    inline uint32_t z = (blockIdx.z * depth) / gridDim.z;
+    const inline uint32_t max_z = ((blockIdx.z + 1) * depth) / gridDim.z;
 
     extern __shared__ float s_data_gX_bZ_flt_new[];
     const int filter_size_b = (2 * radius_b + 1);
@@ -1756,6 +1760,25 @@ __global__ void g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new(float *data_sr
             }
         x = blockIdx.x * blockDim.x + threadIdx.x;
         }
+
+        if (z != 0)
+        {
+            for (int i = radius_b + 1; --i;)
+            {
+                while (x < width)
+                {
+                    inline float locvar = data_src[x + y * width + (z - i) * width * height];
+                    inline char maskvar = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - i) * ((width + 7) / 8) * height];
+
+                    if (maskValue > 0) {locvar = ((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(maskValue, locvar) + (((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * FILTER_NAN(locvar);}
+                    else {locvar = FILTER_NAN(locvar);}
+
+                    z_sum[x] += locvar;
+                    x += blockDim.x;
+                }
+            x = blockIdx.x * blockDim.x + threadIdx.x;
+            }
+        }
     }
 
     if (radius_g > 0 && x < radius_g)
@@ -1763,7 +1786,7 @@ __global__ void g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new(float *data_sr
         *(s_data_gX_bZ_flt_new + x) = *(s_data_src + width + x) = *(s_data_dst + width + x) = 0.0f;
     }
 
-    while (z < depth)
+    while (z < max_z)
     {
         while (x < width)
         {
