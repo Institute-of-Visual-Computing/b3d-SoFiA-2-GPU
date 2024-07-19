@@ -4059,7 +4059,7 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 		printf("Endtime was: %lu\n", 1000000 * my_end_time.tv_sec + my_end_time.tv_nsec);
 	}
 
-	exit(0);
+	//exit(0);
 	
 	return;
 }
