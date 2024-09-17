@@ -1538,6 +1538,8 @@ PUBLIC Array_dbl *DataCube_scale_noise_spec(const DataCube *self, const noise_st
 			if(statistic == NOISE_STAT_STD) rms = std_dev_val_flt(ptr_start, size_xy, 0.0, 1, range);
 			else if(statistic == NOISE_STAT_MAD) rms = MAD_TO_STD * mad_val_flt(ptr_start, size_xy, 0.0, 1, range);
 			else rms = gaufit_flt(ptr_start, size_xy, 1, range);
+
+			if (i == 0) printf("RMS: %0.10e\n", rms);
 			
 			for(float *ptr = ptr_start + size_xy; ptr --> ptr_start;) *ptr /= rms;
 			Array_dbl_set(noise_spectrum, i, rms);
@@ -3908,7 +3910,7 @@ PRIVATE void DataCube_get_xyz(const DataCube *self, const size_t index, size_t *
 ///                      algorithm in term of CPU time will be
 ///                      calculated and printed relative to `clock_time`.
 
-PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double threshold, const double maskScaleXY, const noise_stat method, const int range, const int scaleNoise, const noise_stat snStatistic, const int snRange, const size_t snWindowXY, const size_t snWindowZ, const size_t snGridXY, const size_t snGridZ, const bool snInterpol, const time_t start_time, const clock_t start_clock, const bool useGPU)
+PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double threshold, const double maskScaleXY, const noise_stat method, const int range, const int scaleNoise, const noise_stat snStatistic, const int snRange, const size_t snWindowXY, const size_t snWindowZ, const size_t snGridXY, const size_t snGridZ, const bool snInterpol, const time_t start_time, const clock_t start_clock, const bool useGPU, const bool bench)
 {
 	// Sanity checks
 	check_null(self);
@@ -3949,6 +3951,7 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 	//GPU_test_hist(self->data, self->data_size, cadence, range);
 	//GPU_test_gausfit(self->data, self->data_size, cadence, range);
 	//printf("RMS: %.3e\n", rms);
+	//GPU_test_convolve(self->data, self->data_size, self->axis_size);
 
 	//exit(0);
 
@@ -3960,7 +3963,7 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 
 		char *mask1 = malloc(((self->axis_size[0] + 7) / 8) * self->axis_size[1] * self->axis_size[2] * sizeof(char));
 
-		GPU_DataCube_filter_flt(self->data, mask1, self->data_size, self->axis_size, kernels_spat, kernels_spec, maskScaleXY, method, rms, cadence, range, threshold);
+		GPU_DataCube_filter_flt(self->data, mask1, self->data_size, self->axis_size, kernels_spat, kernels_spec, maskScaleXY, method, rms, cadence, range, threshold, scaleNoise, snStatistic, snRange);
 
 		DataCube_copy_mask1_to_8(maskCube, mask1);
 
@@ -3969,6 +3972,20 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 		printf("GPU Took: %lu ns\n", 1000000 * my_end_time.tv_sec + my_end_time.tv_nsec - (1000000 * my_start_time.tv_sec + my_start_time.tv_nsec));
 		printf("GPU Took in Seconds: %lu\n", my_end_time.tv_sec - my_start_time.tv_sec);
 		printf("Endtime was: %lu\n", 1000000 * my_end_time.tv_sec + my_end_time.tv_nsec);
+
+		if (bench)
+		{
+			FILE *outFile = fopen("benchresults.txt", "a");
+			if (outFile != NULL)
+			{
+				fprintf(outFile, "%lu\n", 1000000 * my_end_time.tv_sec + my_end_time.tv_nsec - (1000000 * my_start_time.tv_sec + my_start_time.tv_nsec));
+				fclose(outFile);
+			}
+			else
+			{
+				printf("Error opening file\n");
+			}
+		}
 
 		free(mask1);
 	}
@@ -4057,9 +4074,26 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 		printf("CPU Took: %lu ns\n", 1000000 * my_end_time.tv_sec + my_end_time.tv_nsec - (1000000 * my_start_time.tv_sec + my_start_time.tv_nsec));
 		printf("CPU Took in Seconds: %lu\n", my_end_time.tv_sec - my_start_time.tv_sec);
 		printf("Endtime was: %lu\n", 1000000 * my_end_time.tv_sec + my_end_time.tv_nsec);
+
+		if (bench)
+		{
+			FILE *outFile = fopen("benchresults.txt", "a");
+			if (outFile != NULL)
+			{
+				fprintf(outFile, "%lu\n", 1000000 * my_end_time.tv_sec + my_end_time.tv_nsec - (1000000 * my_start_time.tv_sec + my_start_time.tv_nsec));
+				fclose(outFile);
+			}
+			else
+			{
+				printf("Error opening file\n");
+			}
+		}
 	}
 
-	exit(0);
+	if (bench)
+	{
+		exit(0);
+	}
 	
 	return;
 }

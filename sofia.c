@@ -979,7 +979,8 @@ int main(int argc, char **argv)
 			Parameter_get_bool(par, "scaleNoise.interpolate"),
 			start_time,
 			start_clock,
-			Parameter_get_bool(par, "pipeline.useGPU")
+			Parameter_get_bool(par, "pipeline.useGPU"),
+			Parameter_get_bool(par, "pipeline.benchmark")
 		);
 		
 		// Clean up

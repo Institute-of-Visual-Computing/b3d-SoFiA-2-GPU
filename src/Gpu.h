@@ -46,10 +46,12 @@ void GPU_test_hist(float *data, size_t size, size_t cadence, const int range);
 
 void GPU_test_gausfit(float *data, size_t size, size_t cadence, const int range);
 
+void GPU_test_convolve(float *data, size_t size, const size_t *axis_size);
+
 void GPU_gaufit(const float *data, const size_t size, float *sigma_out, const size_t cadence, const int range);
 
 
-void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const noise_stat method, const double rms, const size_t cadence, const int range, const double threshold);
+void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const noise_stat method, const double rms, const size_t cadence, const int range, const double threshold, const int scaleNoise, const noise_stat snStatistic, const int snRange);
 
 // copies data into data_box. Values are set to zero where they are NaN
 __global__ void g_copyData_removeBlanks(float *data_box, float *data, const size_t width, const size_t height, const size_t depth);
@@ -79,8 +81,7 @@ __global__ void g_filter_gauss_X_flt_new(float *data, const size_t width, const 
 // Use only, when gauss filter size is not 0. Behaviour for a gauss filter size of 0 is  not supported. Use "g_copyData_setMaskedScale1_removeBlanks_filter_boxcar_Z_flt" instead
 __global__ void g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new(float *data_src, float *data_dst, char *maskData1, const uint16_t width, const uint16_t height, const uint16_t depth, const float maskValue, const uint16_t radius_g, const uint16_t radius_b, const uint16_t n_iter);
 
-// Kernel to apply gaussian filter in y direction. Must be launched in column-wise blocks (so one block per column)
-// It is assumed, that the height of the cube is not larger than 12000 entries
+// Kernel to apply gaussian filter in y direction.
 __global__ void g_filter_gauss_Y_flt(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius, const size_t n_iter);
 
 __global__ void g_filter_gauss_Y_flt_new(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius, const size_t n_iter);
@@ -129,7 +130,7 @@ __global__ void g_DataCube_stat_mad_flt(float *data, float *data_box, size_t wid
 
 __global__ void g_DataCube_stat_mad_flt_2(float *data, float *data_box, size_t size, const float value, const size_t cadence, const int range, const float pivot);
 
-__global__ void g_std_dev_val_flt(float *data, float *data_dst_duo, const size_t size, const float value, const size_t cadence, const int range);
+__global__ void g_std_dev_val_flt(float *data, float *data_dst_duo, const size_t size, const float value, const size_t cadence, const int range, const int scaleNoise);
 
 __global__ void g_std_dev_val_flt_final_step(float *data_duo);
 
@@ -143,6 +144,8 @@ __global__ void g_mad_val_hist_flt_cpy_nth_bin(float *data, const size_t size, f
 
 __global__ void g_mad_val_hist_flt_final_step(float *data, const unsigned int *sizePtr, unsigned int *total_count, unsigned int *bins);
 
+__global__ void g_mad_val_hist_flt_scale_noise(float *data, const size_t size, const float value, const size_t cadence, const int range, const unsigned int precision, const unsigned int max_val_for_eval);
+
 __global__ void g_create_histogram_flt(const float *data, const size_t size, const int range, unsigned int *histogram, const size_t n_bins, const float *data_min, const float *data_max, const size_t cadence);
 
 __global__ void g_scale_max_min_with_second_moment_flt(const unsigned int *histogram, const size_t n_bins, const int range, float *data_min, float *data_max);
@@ -153,6 +156,7 @@ __global__ void g_gaufit_flt(const float *data, const size_t size, unsigned int 
 
 __global__ void g_DataCube_transpose_inplace_flt(float *data, const size_t width, const size_t height, const size_t depth);
 
+__global__ void g_test();
 
 __device__ void d_filter_boxcar_1d_flt(float *data, float *data_copy, const size_t size, const size_t filter_radius, const size_t jump);
 
