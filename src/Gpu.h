@@ -32,6 +32,8 @@ void GPU_test_sdt_dev(float *data, size_t size, size_t cadence, const int range)
 
 void GPU_test_median(float *data, size_t size);
 
+void GPU_test_median_recursive(float *data, size_t size, const size_t *axis_size, const int snRange);
+
 void GPU_test_copy_originalMask();
 
 void GPU_test_flag_sources();

@@ -320,6 +320,63 @@ void GPU_test_median(float *data, size_t size)
     printf("Median: %f\n", data[size]);
 }
 
+void GPU_test_median_recursive(float *data, size_t size, const size_t *axis_size, const int snRange)
+{
+    //size_t size = 999999;
+    //float data[size];// = {100,200,3,4,5,6,7,8,9,10,11};
+
+    //for (int i = 0; i < size; i++) {data[i] = size - i;}
+
+    printf("Array to get median: ");
+
+	for (int i = 0 ; i < 11; i++){printf("%f ", data[i]);}
+
+	printf("\n");
+
+    float *d_data;
+    float *d_data_box;
+    unsigned int *d_counter;
+
+    cudaMalloc((void**)&d_data, size * sizeof(float));
+    cudaMalloc((void**)&d_data_box, size * sizeof(float));
+    cudaMalloc((void**)&d_counter, sizeof(unsigned int));
+
+    cudaMemset(d_data_box, 0, size * sizeof(float));
+    cudaMemset(d_counter, 0, sizeof(unsigned int));
+
+    cudaMemcpy(d_data, data, size * sizeof(float), cudaMemcpyHostToDevice);
+
+    cudaError_t err = cudaGetLastError();
+
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error at start: %s\n", cudaGetErrorString(err));  
+    }
+
+    cudaDeviceSynchronize();
+
+    dim3 blockSize(1024);
+    dim3 gridSize(16);
+
+    uint scale_precision = 4096;
+    uint max_values = 512;
+
+    float true_rms = MAD_TO_STD * mad_val_flt(data, axis_size[0] * axis_size[1], 0.0, 1, snRange);
+
+    printf("True RMS: %0.10e\n", true_rms);
+    
+    g_mad_val_hist_flt_scale_noise<<<1, blockSize, scale_precision * sizeof(uint) + max_values * sizeof(float)>>>(d_data, axis_size[0] * axis_size[1], 0.0f, 1, snRange, scale_precision, max_values);
+    
+    cudaDeviceSynchronize();
+    err = cudaGetLastError();
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error after noise scaling: %s\n", cudaGetErrorString(err));
+    }
+
+    cudaDeviceSynchronize();
+}
+
 void GPU_test_hist(float *data, size_t size, size_t cadence, const int range)
 {
     cudaError_t err = cudaGetLastError();
@@ -1241,7 +1298,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                         uint scale_precision = 4096;
                         uint max_values = 512;
                         
-                        g_mad_val_hist_flt_scale_noise<<<axis_size[2], blockSizeNoise, scale_precision * sizeof(uint) + max_values * sizeof(float)>>>(d_data_box, axis_size[0] * axis_size[1], 0.0f, 1, snRange, scale_precision, max_values);
+                        g_mad_val_hist_flt_scale_noise<<<axis_size[2], 32, scale_precision * sizeof(uint) + max_values * sizeof(float)>>>(d_data_box, axis_size[0] * axis_size[1], 0.0f, 1, snRange, scale_precision, max_values);
                         
                         cudaDeviceSynchronize();
                         err = cudaGetLastError();
@@ -3989,7 +4046,7 @@ __global__ void g_mad_val_hist_flt_scale_noise(float *data, const size_t size, c
 
     __shared__ float min_flt;
     __shared__ float max_flt;
-    __shared__ float rms;
+    __shared__ double rms;
     __shared__ uint total_count;
     __shared__ uint offset;
 
@@ -4076,7 +4133,6 @@ __global__ void g_mad_val_hist_flt_scale_noise(float *data, const size_t size, c
         if (threadIdx.x == 0 && first_pass)
         {
             first_pass = false;
-            if(blockIdx.x == 0) printf("total: %u\n", total_count);
             abs_count = total_count;
         }
 
@@ -4130,7 +4186,7 @@ __global__ void g_mad_val_hist_flt_scale_noise(float *data, const size_t size, c
 
         if (hit & (1 << threadIdx.x % 32))
         {
-            nth_bin[local_offset + __popc(hit)] = val;
+            nth_bin[local_offset + __popc(hit) - 1] = val;
         }
     }
 
@@ -4138,11 +4194,12 @@ __global__ void g_mad_val_hist_flt_scale_noise(float *data, const size_t size, c
 
     if (threadIdx.x == 0)
     {
+
         int i = 0;
         int n = abs_count / 2;
         n -= count_before_n;
 
-        if(blockIdx.x == 0) printf("N: %d, abs: %u, cbn: %u\n", n, abs_count, count_before_n);
+        for (int a = 0; a < s_data_madf_hist_scaleN[selected_bin]; a++) if (blockIdx.x == 0) printf("Abs: %u, Min: %f, Max: %f, value: %.20e\n", abs_count, my_min, my_max, nth_bin[a]);
 
         const unsigned int size = s_data_madf_hist_scaleN[selected_bin];
         float *l = nth_bin;
@@ -4174,8 +4231,9 @@ __global__ void g_mad_val_hist_flt_scale_noise(float *data, const size_t size, c
             if(ptr < i) m = j;
         }
 
-        rms = MAD_TO_STD * *ptr;
-        if (blockIdx.x == 0) printf("RMS: %0.10e\n", rms);
+        rms = MAD_TO_STD * (IS_ODD(abs_count) ? *ptr : (ptr != nth_bin && s_data_madf_hist_scaleN[selected_bin] > 1 ? (*ptr + *(ptr-1)) / 2 : (*ptr + my_min) / 2));
+
+        if (blockIdx.x == 0) printf("rms: %.20e\n", rms);
     }
 
     __syncthreads();

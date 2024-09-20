@@ -1539,7 +1539,7 @@ PUBLIC Array_dbl *DataCube_scale_noise_spec(const DataCube *self, const noise_st
 			else if(statistic == NOISE_STAT_MAD) rms = MAD_TO_STD * mad_val_flt(ptr_start, size_xy, 0.0, 1, range);
 			else rms = gaufit_flt(ptr_start, size_xy, 1, range);
 
-			if (i == 0) printf("RMS: %0.10e\n", rms);
+			if (i == 0) printf("RMS: %.20e\n", mad_val_flt(ptr_start, size_xy, 0.0, 1, range));
 			
 			for(float *ptr = ptr_start + size_xy; ptr --> ptr_start;) *ptr /= rms;
 			Array_dbl_set(noise_spectrum, i, rms);
@@ -3952,6 +3952,7 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 	//GPU_test_gausfit(self->data, self->data_size, cadence, range);
 	//printf("RMS: %.3e\n", rms);
 	//GPU_test_convolve(self->data, self->data_size, self->axis_size);
+	//GPU_test_median_recursive(self->data, self->data_size, self->axis_size, snRange);
 
 	//exit(0);
 
