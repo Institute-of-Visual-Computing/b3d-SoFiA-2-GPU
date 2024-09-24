@@ -1494,7 +1494,6 @@ __global__ void g_addBlanks(float *data_box, float* data, const size_t width, co
         if(IS_NAN(data[index])) 
         {
             data_box[index] = NAN;
-            printf("NaN found\n");
         }
         index += width * height;
     }
