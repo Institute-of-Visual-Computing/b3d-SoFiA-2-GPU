@@ -50,6 +50,8 @@ void GPU_test_gausfit(float *data, size_t size, size_t cadence, const int range)
 
 void GPU_test_convolve(float *data, size_t size, const size_t *axis_size);
 
+void GPU_test_what_is_wrong(DataCube *self, char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const noise_stat method, const double rms, const size_t cadence, const int range, const double threshold, const int scaleNoise, const noise_stat snStatistic, const int snRange);
+
 void GPU_gaufit(const float *data, const size_t size, float *sigma_out, const size_t cadence, const int range);
 
 
@@ -81,7 +83,7 @@ __global__ void g_filter_gauss_X_flt_new(float *data, const size_t width, const 
 
 // Must be started with a grid Dimension of 1 in x and z direction and use height as y dimension for the grid
 // Use only, when gauss filter size is not 0. Behaviour for a gauss filter size of 0 is  not supported. Use "g_copyData_setMaskedScale1_removeBlanks_filter_boxcar_Z_flt" instead
-__global__ void g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new(float *data_src, float *data_dst, char *maskData1, const uint16_t width, const uint16_t height, const uint16_t depth, const float maskValue, const uint16_t radius_g, const uint16_t radius_b, const uint16_t n_iter);
+__global__ void g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new(float *data_src, float *data_dst, char *maskData1, const uint16_t width, const uint16_t height, const uint16_t depth, const float maskValue, uint16_t radius_g, const uint16_t radius_b, const uint16_t n_iter);
 
 // Kernel to apply gaussian filter in y direction.
 __global__ void g_filter_gauss_Y_flt(float *data, const size_t width, const size_t height, const size_t depth, const size_t radius, const size_t n_iter);

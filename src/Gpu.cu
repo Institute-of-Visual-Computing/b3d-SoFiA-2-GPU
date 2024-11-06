@@ -805,6 +805,130 @@ void GPU_test_convolve(float *data, size_t size, const size_t *axis_size)
     cudaDeviceSynchronize();
 }
 
+void GPU_test_what_is_wrong(DataCube *self, char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const noise_stat method, const double rms, const size_t cadence, const int range, const double threshold, const int scaleNoise, const noise_stat snStatistic, const int snRange)
+{
+    printf("CPU at %i %i %i: %.10e\n\n", 115, 193, 35, DataCube_get_data_flt(self, 115, 193, 35));
+
+    size_t width = axis_size[0];
+    size_t height = axis_size[1];
+    size_t depth = axis_size[2];
+
+    float *d_data;
+    float *d_data_box;
+    unsigned int *d_counter;
+    char *d_mask_data;
+
+    // Set up Bitmask space efficient on GPU one byte handles 8 entries in from the cube,
+    // since here we only need to mask pixels, not differ between individual sources
+    size_t d_mask_size = ((width + 7) / 8) * height * depth * sizeof(char);
+    printf("Allocating %fMB for the mask\n", d_mask_size / (1024.0f * 1024.0f));
+	cudaMalloc((void**)&d_mask_data, d_mask_size);
+    cudaMemset(d_mask_data, 0, d_mask_size);
+
+
+    cudaMalloc((void**)&d_data, data_size * sizeof(float));
+    cudaMalloc((void**)&d_data_box, data_size * sizeof(float));
+    cudaMalloc((void**)&d_counter, sizeof(unsigned int));
+
+    cudaMemset(d_data_box, 0, data_size * sizeof(float));
+    cudaMemset(d_counter, 0, sizeof(unsigned int));
+
+    cudaMemcpy(d_data, data, data_size * sizeof(float), cudaMemcpyHostToDevice);
+
+    cudaError_t err = cudaGetLastError();
+
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error at start: %s\n", cudaGetErrorString(err));  
+    }
+
+    cudaDeviceSynchronize();
+
+    dim3 blockSizeXZ(256,1);
+    dim3 gridSizeXZ(1,height,1);
+
+    dim3 blockSizeY(64,8);
+    dim3 gridSizeY((width + 7) / 8,1, 16);
+
+    size_t radius_gauss;
+    size_t radius_boxcar;
+    size_t n_iter;
+
+    const double FWHM_CONST = 2.0 * sqrt(2.0 * log(2.0));
+    //optimal_filter_size_dbl(Array_dbl_get(kernels_spat, 0) / FWHM_CONST, &radius_gauss, &n_iter);
+    optimal_filter_size_dbl(2, &radius_gauss, &n_iter);
+
+    radius_boxcar = 3;
+    printf("RadiusGauss: %lu, n_iter: %lu\n", radius_gauss, n_iter);
+
+    g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new<<<gridSizeXZ, blockSizeXZ, ((radius_gauss > 0 ? 1 : 0) * (radius_gauss * 3 + width * 2) + (radius_boxcar > 0 ? 1 : 0) * width) * sizeof(float)>>>
+    (d_data, d_data_box, d_mask_data, width, height, depth, maskScaleXY * rms, radius_gauss, radius_boxcar, n_iter);
+
+    g_filter_gauss_Y_flt_new<<<gridSizeY, blockSizeY, (9 * height + 10 * radius_gauss) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
+    cudaDeviceSynchronize();
+
+    err = cudaGetLastError();
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error after Y Kernel: %s\n", cudaGetErrorString(err));    
+    }
+
+    cudaDeviceSynchronize();
+    err = cudaGetLastError();
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error after kernel: %s\n", cudaGetErrorString(err));
+    }
+    
+    DataCube *maskCube = DataCube_blank(DataCube_get_axis_size(self, 0), DataCube_get_axis_size(self, 1), DataCube_get_axis_size(self, 2), 8, false);
+	DataCube_copy_wcs(self, maskCube);
+	DataCube_puthd_str(maskCube, "BUNIT", " ");
+
+    // Smoothing required; create a copy of the original cube
+    DataCube *smoothedCube = DataCube_copy(self);
+    
+    // Set flux of already detected pixels to maskScaleXY * rms
+    if(maskScaleXY >= 0.0) DataCube_set_masked_8(smoothedCube, maskCube, maskScaleXY * rms);
+
+    // Spatial and spectral smoothing
+    //if(Array_dbl_get(kernels_spat, i) > 0.0) DataCube_gaussian_filter(smoothedCube, Array_dbl_get(kernels_spat, i) / FWHM_CONST);
+    //if(Array_siz_get(kernels_spec, j) > 0)   DataCube_boxcar_filter(smoothedCube, Array_siz_get(kernels_spec, j) / 2);
+
+    DataCube_boxcar_filter(smoothedCube, radius_boxcar);
+    DataCube_gaussian_filter(smoothedCube, 2);
+
+    cudaDeviceSynchronize();
+
+    cudaMemcpy(data, d_data_box, data_size * sizeof(float), cudaMemcpyDeviceToHost);
+
+    err = cudaGetLastError();
+    if (err != cudaSuccess)
+    {
+        printf("Cuda error after back cpy: %s\n", cudaGetErrorString(err));
+    }
+
+    cudaDeviceSynchronize();
+
+    for (int i = 10; i--;)
+    {
+        int x = rand() % width;
+        int y = rand() % height;
+        int z = rand() % depth;
+
+        printf("CPU at %i %i %i: %.10e\n", x, y, z, DataCube_get_data_flt(smoothedCube, x, y, z));
+        printf("GPU at %i %i %i: %.10e\n", x, y, z, DataCube_get_data_flt(self, x, y, z));
+        if (DataCube_get_data_flt(smoothedCube, x, y, z) == DataCube_get_data_flt(self, x, y, z))
+        {
+            printf("OK\n");
+        }
+        else
+        {
+            printf("Wrong!\n");
+        }
+        printf("\n");
+    }
+}
+
 void GPU_gaufit(const float *d_data, const size_t size, float *d_sigma_out, const size_t cadence, const int range)
 {
     // Determine maximum and minimum
@@ -928,6 +1052,7 @@ void GPU_test_cpy_msk_1_to_8()
     cudaFree(mask1);
     cudaFree(mask8);
 }
+
 
 
 void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const noise_stat method, const double rms, const size_t cadence, const int range, const double threshold, const int scaleNoise, const noise_stat snStatistic, const int snRange)
@@ -1209,6 +1334,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                     }
                     else
                     {
+                        printf("Launching data copy, flux masking and NAN deletion\n");
                         //g_copyData_setMaskedScale8_removeBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, d_original_mask, width, height, depth, maskScaleXY * rms);
                         g_copyData_setMaskedScale1_removeBlanks<<<gridSizeMS, blockSizeMS>>>(d_data_box, d_data, d_mask_data, width, height, depth, maskScaleXY * rms);
                         cudaDeviceSynchronize();
@@ -1226,21 +1352,26 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                     printf("Launching data copy, flux masking, NAN deletion Gauss X and Boxcar Z…\n");
                     g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new<<<gridSizeXZ, blockSizeXZ, ((radius_gauss > 0 ? 1 : 0) * (radius_gauss * 3 + width * 2) + (radius_boxcar > 0 ? 1 : 0) * width) * sizeof(float)>>>
                     (d_data, d_data_box, d_mask_data, width, height, depth, maskScaleXY * rms, radius_gauss, radius_boxcar, n_iter);
+                    err = cudaGetLastError();
+                    if (err != cudaSuccess)
+                    {
+                        printf("Cuda error after X-Z Kernel: %s\n", cudaGetErrorString(err));    
+                    }
                     cudaDeviceSynchronize();
                 }
                 
-                // if(radius_gauss > 0)
-                // {
-                //     printf("Launching Gauss X…\n");
-                //     g_filter_gauss_X_flt_new<<<gridSizeX, blockSizeX, (4 * width + 5 * radius_gauss) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
-                //     cudaDeviceSynchronize();
+                if(radius_gauss > 0)
+                {
+                    // printf("Launching Gauss X…\n");
+                    // g_filter_gauss_X_flt_new<<<gridSizeX, blockSizeX, (4 * width + 5 * radius_gauss) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
+                    // cudaDeviceSynchronize();
 
-                //     err = cudaGetLastError();
-                //     if (err != cudaSuccess)
-                //     {
-                //         printf("Cuda error after X Kernel: %s\n", cudaGetErrorString(err));    
-                //     }
-                // }
+                    // err = cudaGetLastError();
+                    // if (err != cudaSuccess)
+                    // {
+                    //     printf("Cuda error after X Kernel: %s\n", cudaGetErrorString(err));    
+                    // }
+                }
                     
                 if(radius_gauss > 0)
                 {
@@ -1255,7 +1386,8 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
 
                     // g_DataCube_transpose_inplace_flt<<<gridSizeT, blockSizeT>>>(d_data_box, width, height, depth);
 
-                    printf("Launching Gauss Y…\n");
+
+                    // printf("Launching Gauss Y…\n");
 
                     //g_filter_gauss_Y_flt<<<gridSizeYC, blockSizeYC, ((blockSizeYC.x + 1) * (n_iter * 2 * radius_gauss + 1) + blockSizeYC.x * (blockSizeYC.y - 1)) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
                     g_filter_gauss_Y_flt_new<<<gridSizeY, blockSizeY, (9 * height + 10 * radius_gauss) * sizeof(float)>>>(d_data_box, width, height, depth, radius_gauss, n_iter);
@@ -1323,7 +1455,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                     // cudaMemcpy(&count, d_med_counter, sizeof(unsigned int), cudaMemcpyDeviceToHost);
                     // printf("Median values count: %u\n", count);
                     // g_mad_val_flt_final_step<<<1,1024>>>(d_median_arr, d_med_counter);
-                    // cudaMemcpy(d_data_duo, d_median_arr, 1 * sizeof(float), cudaMemcpyDeviceToDevice);
+                    // cudaMemcpy(d_data_duo, d_median_arr, 1 * sizeof(double), cudaMemcpyDeviceToDevice);
                     printf("Starting MAD\n");
                     g_mad_val_hist_flt<<<gridSizeNoise, blockSizeNoise, mad_precision * sizeof(unsigned int)>>>(d_data_box, data_size, d_bins, d_med_total_values, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
                     g_mad_val_hist_flt_cpy_nth_bin<<<gridSizeNoise, blockSizeNoise, blockSizeNoise.x * sizeof(float)>>>(d_data_box, data_size, d_median_arr, d_bins, d_med_total_values, d_med_counter, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max); 
@@ -1373,7 +1505,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                     {
                         printf("Cuda error before first noise calc: %s\n", cudaGetErrorString(err));    
                     }
-                    g_std_dev_val_flt<<<gridSizeNoise, blockSizeNoise, 1024 * 2 * sizeof(float)>>>(d_data_box, d_data_duo, data_size, 0.0f, cadence, range, 0);
+                    g_std_dev_val_flt<<<gridSizeNoise, blockSizeNoise, 1024 * 2 * sizeof(float)>>>(d_data, d_data_duo, data_size, 0.0f, cadence, range, 0);
                     g_std_dev_val_flt_final_step<<<1,1>>>(d_data_duo);
                 }
                 else if (method == NOISE_STAT_MAD)
@@ -1401,8 +1533,8 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                     // cudaDeviceSynchronize();
 
                     printf("Starting MAD\n");
-                    g_mad_val_hist_flt<<<gridSizeNoise, blockSizeNoise, mad_precision * sizeof(unsigned int)>>>(d_data_box, data_size, d_bins, d_med_total_values, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
-                    g_mad_val_hist_flt_cpy_nth_bin<<<gridSizeNoise, blockSizeNoise, blockSizeNoise.x * sizeof(float)>>>(d_data_box, data_size, d_median_arr, d_bins, d_med_total_values, d_med_counter, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
+                    g_mad_val_hist_flt<<<gridSizeNoise, blockSizeNoise, mad_precision * sizeof(unsigned int)>>>(d_data, data_size, d_bins, d_med_total_values, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
+                    g_mad_val_hist_flt_cpy_nth_bin<<<gridSizeNoise, blockSizeNoise, blockSizeNoise.x * sizeof(float)>>>(d_data, data_size, d_median_arr, d_bins, d_med_total_values, d_med_counter, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
                     g_mad_val_hist_flt_final_step<<<1,1>>>(d_median_arr, d_med_counter, d_med_total_values, d_bins);
 
                     cudaDeviceSynchronize();
@@ -1411,7 +1543,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                 }
                 else
                 {
-                    GPU_gaufit(d_data_box, data_size, d_data_duo, cadence, range);
+                    GPU_gaufit(d_data, data_size, d_data_duo, cadence, range);
                 }
 
                 err = cudaGetLastError();
@@ -1512,7 +1644,7 @@ __global__ void g_copyData_setMaskedScale1_removeBlanks(float *data_box, float *
     {
         while (z < depth)
         {
-            data_box[index] = ((maskData1[index1] & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(value, data[index]) + (((maskData1[index1] & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * FILTER_NAN(data[index]);
+            data_box[index] = ((maskData1[index1] & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(value, FILTER_NAN(data[index])) + (((maskData1[index1] & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * FILTER_NAN(data[index]);
 
             index += width * height;
             index1 += ((width + 7) / 8) * height;
@@ -1605,10 +1737,10 @@ __global__ void g_copyData_setMaskedScale1_removeBlanks_filter_boxcar_Z_flt(floa
                 value -= s_data_start[ptr];
             }
 
-            float locvar = data[x + y * width + z * width * height];
+            float locvar = FILTER_NAN(data[x + y * width + z * width * height]);
             char maskvar = maskData1[(x / 8) + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height];
 
-            locvar = ((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(maskValue, locvar) + (((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * FILTER_NAN(locvar);
+            locvar = ((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(maskValue, locvar) + (((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * locvar;
 
             value += s_data_start[ptr++] = locvar;
             ptr = ptr % filter_size;
@@ -1756,7 +1888,7 @@ __global__ void g_filter_gauss_X_flt_new(float *data, const size_t width, const 
         x = x0;
         __syncthreads();
 
-        for (int i = n_iter; i--;)
+        for (int n = n_iter; n--;)
         {
             while (y < height && x < width)
             {
@@ -1781,13 +1913,13 @@ __global__ void g_filter_gauss_X_flt_new(float *data, const size_t width, const 
             x += xPage;
         }
         x = x0;
-        z+= gridDim.z;
+        z += gridDim.z;
     }
 }
 
-__global__ void g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new(float *data_src, float *data_dst, char *maskData1, const uint16_t width, const uint16_t height, const uint16_t depth, const float maskValue, const uint16_t radius_g, const uint16_t radius_b, const uint16_t n_iter)
+__global__ void g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new(float *data_src, float *data_dst, char *maskData1, const uint16_t width, const uint16_t height, const uint16_t depth, const float maskValue, uint16_t radius_g, const uint16_t radius_b, const uint16_t n_iter)
 {
-     uint16_t x = blockIdx.x * blockDim.x + threadIdx.x;
+    uint16_t x = blockIdx.x * blockDim.x + threadIdx.x;
     const uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
     uint32_t z = (blockIdx.z * depth) / gridDim.z;
     const uint32_t max_z = ((blockIdx.z + 1) * depth) / gridDim.z;
@@ -1798,7 +1930,7 @@ __global__ void g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new(float *data_sr
     const float invers_b = 1.0f / filter_size_b;
     const float invers_g = 1.0f / filter_size_g;
     float *s_data_src = s_data_gX_bZ_flt_new + radius_g;
-    float * s_data_dst = s_data_src + width + radius_g;
+    float *s_data_dst = s_data_src + width + radius_g;
     float *z_sum = s_data_gX_bZ_flt_new + 3 * radius_g * (int)__saturatef(radius_g) + 2 * width * (int)__saturatef(radius_g);
 
     if (y >= height) return;
@@ -1807,11 +1939,11 @@ __global__ void g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new(float *data_sr
     {
         while (x < width)
         {
-            float locvar = data_src[x + y * width + z * width * height];
+            float locvar = FILTER_NAN(data_src[x + y * width + z * width * height]);
             char maskvar = maskData1[(x / 8) + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height];
 
-            if (maskValue > 0) {locvar = ((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(maskValue, locvar) + (((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * FILTER_NAN(locvar);}
-            else {locvar = FILTER_NAN(locvar);}
+            if (maskValue >= 0) {locvar = ((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(maskValue, locvar) + (((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * locvar;}
+            //else {locvar = FILTER_NAN(locvar);}
 
             z_sum[x] = locvar;
             x += blockDim.x;
@@ -1822,11 +1954,11 @@ __global__ void g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new(float *data_sr
         {
             while (x < width)
             {
-                float locvar = data_src[x + y * width + (z + i) * width * height];
+                float locvar = FILTER_NAN(data_src[x + y * width + (z + i) * width * height]); // TODO protect for large radii with too small parts (i.e. z+i > depth)
                 char maskvar = maskData1[(x / 8) + y * ((width + 7) / 8) + (z + i) * ((width + 7) / 8) * height];
 
-                if (maskValue > 0) {locvar = ((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(maskValue, locvar) + (((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * FILTER_NAN(locvar);}
-                else {locvar = FILTER_NAN(locvar);}
+                if (maskValue >= 0) {locvar = ((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(maskValue, locvar) + (((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * locvar;}
+                //else {locvar = FILTER_NAN(locvar);}
 
                 z_sum[x] += locvar;
                 x += blockDim.x;
@@ -1834,17 +1966,17 @@ __global__ void g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new(float *data_sr
         x = blockIdx.x * blockDim.x + threadIdx.x;
         }
 
-        if (z != 0)
+        if (z != 0) // TODO protect this, if radius is bigger than z size of parts it will spill
         {
             for (int i = radius_b + 1; --i;)
             {
                 while (x < width)
                 {
-                    float locvar = data_src[x + y * width + (z - i) * width * height];
+                    float locvar = FILTER_NAN(data_src[x + y * width + (z - i) * width * height]); // TODO protect for large radii with too small parts (i.e. z-i < 0)
                     char maskvar = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - i) * ((width + 7) / 8) * height];
 
-                    if (maskValue > 0) {locvar = ((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(maskValue, locvar) + (((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * FILTER_NAN(locvar);}
-                    else {locvar = FILTER_NAN(locvar);}
+                    if (maskValue > 0) {locvar = ((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(maskValue, locvar) + (((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * locvar;}
+                    //else {locvar = FILTER_NAN(locvar);}
 
                     z_sum[x] += locvar;
                     x += blockDim.x;
@@ -1863,10 +1995,10 @@ __global__ void g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new(float *data_sr
     {
         while (x < width)
         {
-            float locvar = radius_b > 0 ? (z + radius_b < depth ? data_src[x + y * width + (z + radius_b) * width * height] : 0.0f) : data_src[x + y * width + z * width * height];
+            float locvar = FILTER_NAN(radius_b > 0 ? (z + radius_b < depth ? data_src[x + y * width + (z + radius_b) * width * height] : 0.0f) : data_src[x + y * width + z * width * height]);
             char maskvar = radius_b > 0 ? (z + radius_b < depth ? maskData1[(x / 8) + y * ((width + 7) / 8) + (z + radius_b) * ((width + 7) / 8) * height] : 0) : maskData1[(x / 8) + y * ((width + 7) / 8) + z * ((width + 7) / 8) * height];
 
-            if (maskValue > 0) {locvar = ((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(maskValue, locvar) + (((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * FILTER_NAN(locvar);}
+            if (maskValue > 0) {locvar = ((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(maskValue, locvar) + (((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * locvar;}
             else {locvar = FILTER_NAN(locvar);}
 
             if (radius_b > 0)
@@ -1877,6 +2009,10 @@ __global__ void g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new(float *data_sr
             if (radius_g > 0)
             {
                 s_data_src[x] = radius_b > 0 ? z_sum[x] * invers_b : locvar;
+            }
+            else if (radius_g <= 0 && radius_b <= 0)
+            {
+                data_dst[x + y * width + z * width * height] = locvar;
             }
 
             x += blockDim.x;
@@ -1907,22 +2043,25 @@ __global__ void g_cpyData_setMskScale1_rmBlnks_fltr_gX_bZ_flt_new(float *data_sr
             }
         }
 
-        while (x < width)
+        if (radius_g > 0 || radius_b > 0)
         {
-            data_dst[x + y * width + z * width * height] = radius_g > 0 ? *(s_data_src + x) : z_sum[x] * invers_b;
-            x += blockDim.x;
+            while (x < width)
+            {
+                data_dst[x + y * width + z * width * height] = radius_g > 0 ? *(s_data_src + x) : z_sum[x] * invers_b;
+                x += blockDim.x;
+            }
+            x = blockIdx.x * blockDim.x + threadIdx.x;
         }
-        x = blockIdx.x * blockDim.x + threadIdx.x;
 
         if (radius_b > 0 && z >= radius_b)
         {
             while (x < width)
             {
-                float sub_val = data_src[x + y * width + (z - radius_b) * width * height];
+                float sub_val = FILTER_NAN(data_src[x + y * width + (z - radius_b) * width * height]);
                 char maskvar = maskData1[(x / 8) + y * ((width + 7) / 8) + (z - radius_b) * ((width + 7) / 8) * height];
 
-                if (maskValue > 0) {sub_val = ((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(maskValue, sub_val) + (((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * FILTER_NAN(sub_val);}
-                else {sub_val = FILTER_NAN(sub_val);}
+                if (maskValue > 0) {sub_val = ((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) * copysign(maskValue, sub_val) + (((maskvar & (1 << (7 - (x % 8)))) >> (7 - (x % 8))) ^ 1) * sub_val;}
+                //else {sub_val = FILTER_NAN(sub_val);}
 
                 z_sum[x] -= sub_val;
                 x += blockDim.x;
@@ -2665,7 +2804,8 @@ __global__ void g_Mask1(float *data_box, char *maskData1, const size_t width, co
         while (z < depth)
         {
 
-            result = (!(__float_as_int(fabs(data_box[index + z * width * height]) - threshold * (*rms_smooth)) >> 31)) << (7 - (threadIdx.x % 8));
+            //result = (!(__float_as_int(fabs(data_box[index + z * width * height]) - threshold * (*rms_smooth)) >> 31)) << (7 - (threadIdx.x % 8));
+            result = (fabs(data_box[index + z * width * height]) > threshold * (*rms_smooth)) << (7 - (threadIdx.x % 8));
 
             //if (IS_NAN(data_box[index + z * width * height])) printf("NaN result: %i\n", result);
 
@@ -3639,8 +3779,8 @@ __global__ void g_std_dev_val_flt(float *data, float *data_dst_duo, const size_t
 
     if (threadIdx.x == 0)
     {
-        atomicAdd(data_dst_duo, *s_data_sdf_start);
-        atomicAdd(data_dst_duo + 1, *(s_data_sdf_start + 1));
+        atomicAdd(data_dst_duo, (*s_data_sdf_start));
+        atomicAdd(data_dst_duo + 1, (*(s_data_sdf_start + 1)));
     }
 }
 
