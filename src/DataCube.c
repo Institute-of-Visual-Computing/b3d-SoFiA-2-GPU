@@ -3952,7 +3952,7 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 	//GPU_test_gausfit(self->data, self->data_size, cadence, range);
 	//printf("RMS: %.3e\n", rms);
 	//GPU_test_convolve(self->data, self->data_size, self->axis_size);
-	//GPU_test_median_recursive(self->data, self->data_size, self->axis_size, snRange);
+	//GPU_test_median_recursive(self->data, self->data_size, self->axis_size, range);
 
 	//exit(0);
 

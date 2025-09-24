@@ -54,6 +54,7 @@ void GPU_test_what_is_wrong(DataCube *self, char *data, char *maskdata, size_t d
 
 void GPU_gaufit(const float *data, const size_t size, float *sigma_out, const size_t cadence, const int range);
 
+void GPU_MAD(float *d_data, size_t size, float *d_dstMAD, const int snRange, unsigned int precision, const size_t cadence, float h_min, float h_max);
 
 void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const size_t *axis_size, const Array_dbl *kernels_spat, const Array_siz *kernels_spec, const double maskScaleXY, const noise_stat method, const double rms, const size_t cadence, const int range, const double threshold, const int scaleNoise, const noise_stat snStatistic, const int snRange);
 
@@ -179,6 +180,11 @@ __device__ static float atomicMin(float* address, float val);
 
 void sort_arr_flt(float *arr, size_t size);
 
+__global__ void g_bin_data(float *data, const size_t size, unsigned int *bins, const unsigned int precision, const float min_flt, const float max_flt, const int range, const size_t cadence, unsigned int *total_count, bool flag);
+
+__global__ void g_cpy_bin(float *data, const size_t size, float *target_arr, unsigned int *arr_ptr, const float min_flt, const float max_flt, const int range, const size_t cadence);
+
+__global__ void g_median_final(float *data, const unsigned int *sizePtr, unsigned int n);
 
 // Inline function to set a specific bit in an array
 inline void setByte(char* array, int index, bool value) 

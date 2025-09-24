@@ -322,26 +322,24 @@ void GPU_test_median(float *data, size_t size)
 
 void GPU_test_median_recursive(float *data, size_t size, const size_t *axis_size, const int snRange)
 {
-    //size_t size = 999999;
-    //float data[size];// = {100,200,3,4,5,6,7,8,9,10,11};
+    uint precision = 32;
+    float h_max;
+    float h_min;
 
-    //for (int i = 0; i < size; i++) {data[i] = size - i;}
-
-    printf("Array to get median: ");
-
-	for (int i = 0 ; i < 11; i++){printf("%f ", data[i]);}
-
-	printf("\n");
+    max_min_flt(data, size, &h_max, &h_min);
 
     float *d_data;
     float *d_data_box;
+    unsigned int *d_bins;
     unsigned int *d_counter;
 
     cudaMalloc((void**)&d_data, size * sizeof(float));
     cudaMalloc((void**)&d_data_box, size * sizeof(float));
+    cudaMalloc((void**)&d_bins, precision * sizeof(unsigned int));
     cudaMalloc((void**)&d_counter, sizeof(unsigned int));
 
     cudaMemset(d_data_box, 0, size * sizeof(float));
+    cudaMemset(d_bins, 0, precision * sizeof(unsigned int));
     cudaMemset(d_counter, 0, sizeof(unsigned int));
 
     cudaMemcpy(d_data, data, size * sizeof(float), cudaMemcpyHostToDevice);
@@ -355,25 +353,168 @@ void GPU_test_median_recursive(float *data, size_t size, const size_t *axis_size
 
     cudaDeviceSynchronize();
 
-    dim3 blockSize(1024);
+    dim3 blockSize(256);
     dim3 gridSize(16);
 
-    uint scale_precision = 4096;
-    uint max_values = 512;
+    float true_rms = mad_val_flt(data, size, 0.0, 1, snRange);
 
-    float true_rms = MAD_TO_STD * mad_val_flt(data, axis_size[0] * axis_size[1], 0.0, 1, snRange);
+    printf("True RMS: %0.20e\n", true_rms);
 
-    printf("True RMS: %0.10e\n", true_rms);
-    
-    g_mad_val_hist_flt_scale_noise<<<1, blockSize, scale_precision * sizeof(uint) + max_values * sizeof(float)>>>(d_data, axis_size[0] * axis_size[1], 0.0f, 1, snRange, scale_precision, max_values);
-    
-    cudaDeviceSynchronize();
-    err = cudaGetLastError();
-    if (err != cudaSuccess)
+    int selectedBin = 0;
+    unsigned int h_bins[precision];
+    unsigned int tmpCount;
+    unsigned int h_count = 0;
+    unsigned int median_counter = 0;
+    unsigned int breakCond = 500;
+
+    float *d_med_arr;
+    unsigned int *d_med_ptr;
+    cudaMalloc((void**)&d_med_arr, breakCond * sizeof(float));
+    cudaMalloc((void**)&d_med_ptr, sizeof(unsigned int));
+    cudaMemset(d_med_ptr, 0, sizeof(unsigned int));
+
+    h_bins[0] = breakCond + 1;
+
+    int iteration = 0;
+    float my_max = snRange == 0 ? max(fabs(h_min), fabs(h_max)) : (snRange < 0 ? max(fabs(h_min), 0.0f) : max(fabs(h_max), 0.0f));
+    while (h_bins[selectedBin] > breakCond && iteration < 20)
     {
-        printf("Cuda error after noise scaling: %s\n", cudaGetErrorString(err));
+        selectedBin = 0;
+        cudaMemset(d_bins, 0, precision * sizeof(unsigned int));
+        cudaMemset(d_counter, 0, sizeof(unsigned int));
+        g_bin_data<<<gridSize, blockSize, (blockSize.x / 32) * precision * sizeof(unsigned int) >>>(d_data, size, d_bins, precision, h_min, h_max, snRange, 1, d_counter, iteration != 0);
+
+        cudaDeviceSynchronize();
+        err = cudaGetLastError();
+        if (err != cudaSuccess)
+        {
+            printf("Cuda error after noise scaling: %s\n", cudaGetErrorString(err));
+        }
+
+        cudaMemcpy(h_bins, d_bins, precision * sizeof(unsigned int), cudaMemcpyDeviceToHost);
+        cudaMemcpy(&tmpCount, d_counter, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+
+        cudaDeviceSynchronize();
+
+        if (iteration == 0)
+        {
+            median_counter = tmpCount / 2;
+        }
+
+        unsigned int k = median_counter - h_count + 1;
+
+
+        for (int i = h_bins[0]; i < k; i+=h_bins[++selectedBin])
+        {
+            h_count += h_bins[selectedBin];
+        }
+
+        float bucket_size = iteration != 0 ? (h_max - h_min) / precision : my_max / precision;
+
+        if (iteration == 0)
+        {
+            h_min = bucket_size * selectedBin;
+            h_max = bucket_size * (selectedBin + 1);
+        }
+        else
+        {
+            h_min = h_min + bucket_size * selectedBin;
+            h_max = h_min + bucket_size;
+        }
+
+        iteration++;
+
+        if(h_bins[selectedBin] < breakCond)
+        {
+            g_cpy_bin<<<gridSize, blockSize>>>(d_data, size, d_med_arr, d_med_ptr, h_min, h_max, snRange, 1);
+            g_median_final<<<1,1>>>(d_med_arr, d_med_ptr,  median_counter - h_count);
+            cudaDeviceSynchronize();
+        }
+    }
+    cudaDeviceSynchronize();
+}
+
+void GPU_MAD(float *d_data, size_t size, float *d_dstMAD, const int snRange, unsigned int precision, const size_t cadence, float h_min, float h_max)
+{
+    unsigned int *d_bins;
+    unsigned int *d_counter;
+    float *d_med_arr;
+    unsigned int *d_med_ptr;
+
+    int selectedBin = 0;
+    unsigned int h_bins[precision];
+    unsigned int tmpCount;
+    unsigned int h_count = 0;
+    unsigned int median_counter = 0;
+    unsigned int breakCond = 500;
+
+    cudaMalloc((void**)&d_bins, precision * sizeof(unsigned int));
+    cudaMalloc((void**)&d_counter, sizeof(unsigned int));
+    cudaMalloc((void**)&d_med_arr, breakCond * sizeof(float));
+    cudaMalloc((void**)&d_med_ptr, sizeof(unsigned int));
+
+    cudaMemset(d_med_ptr, 0, sizeof(unsigned int));
+
+    cudaError_t err = cudaGetLastError();
+
+    dim3 blockSize(256);
+    dim3 gridSize(16);
+
+    h_bins[0] = breakCond + 1;
+    int iteration = 0;
+    float my_max = snRange == 0 ? max(fabs(h_min), fabs(h_max)) : (snRange < 0 ? max(fabs(h_min), 0.0f) : max(fabs(h_max), 0.0f));
+
+    while (h_bins[selectedBin] > breakCond && iteration < 1000)
+    {
+        selectedBin = 0;
+        cudaMemset(d_bins, 0, precision * sizeof(unsigned int));
+        cudaMemset(d_counter, 0, sizeof(unsigned int));
+        g_bin_data<<<gridSize, blockSize, (blockSize.x / 32) * precision * sizeof(unsigned int)>>>(d_data, size, d_bins, precision, h_min, h_max, snRange, cadence, d_counter, iteration != 0);
+
+        cudaDeviceSynchronize();
+        err = cudaGetLastError();
+        if (err != cudaSuccess)
+        {
+            printf("Cuda error after new MAD: %s\n", cudaGetErrorString(err));
+        }
+
+        cudaMemcpy(h_bins, d_bins, precision * sizeof(unsigned int), cudaMemcpyDeviceToHost);
+        cudaMemcpy(&tmpCount, d_counter, sizeof(unsigned int), cudaMemcpyDeviceToHost);
+
+        cudaDeviceSynchronize();
+
+        if (iteration == 0)
+        {
+            median_counter = tmpCount / 2;
+        }
+
+        unsigned int k = median_counter - h_count + 1;
+
+        for (int i = h_bins[0]; i < k; i+=h_bins[++selectedBin])
+        {
+            h_count += h_bins[selectedBin];
+        }
+
+        float bucket_size = iteration != 0 ? (h_max - h_min) / precision : my_max / precision;
+
+        if (iteration == 0)
+        {
+            h_min = bucket_size * selectedBin;
+            h_max = bucket_size * (selectedBin + 1);
+        }
+        else
+        {
+            h_min = h_min + bucket_size * selectedBin;
+            h_max = h_min + bucket_size;
+        }
+
+        iteration++;
+        cudaDeviceSynchronize();
     }
 
+    g_cpy_bin<<<gridSize, blockSize>>>(d_data, size, d_med_arr, d_med_ptr, h_min, h_max, snRange, cadence);
+    g_median_final<<<1,1>>>(d_med_arr, d_med_ptr,  median_counter - h_count);
+    cudaMemcpy(d_dstMAD, d_med_arr, sizeof(float), cudaMemcpyDeviceToDevice);
     cudaDeviceSynchronize();
 }
 
@@ -1097,7 +1238,7 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     float *d_data_max;
     float *d_median_arr;
     float *d_median_arr_swap;
-    unsigned int mad_precision = 8192;
+    unsigned int mad_precision = 64;
     unsigned int *d_bins;
     unsigned int *d_med_total_values;
     unsigned int *d_med_counter;
@@ -1275,9 +1416,13 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
     dim3 blockSizeNoise(1024);
     dim3 gridSizeNoise(1024);
 
+    float h_min;
+    float h_max;
     if (method == NOISE_STAT_MAD)
     {
         g_find_max_min<<<512, 1024>>>(d_data, data_size, cadence, d_data_min, d_data_max);
+        cudaMemcpy(&h_min, d_data_min, sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(&h_max, d_data_max, sizeof(float), cudaMemcpyDeviceToHost);
     }
 
     err = cudaGetLastError();
@@ -1457,8 +1602,8 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                     // g_mad_val_flt_final_step<<<1,1024>>>(d_median_arr, d_med_counter);
                     // cudaMemcpy(d_data_duo, d_median_arr, 1 * sizeof(double), cudaMemcpyDeviceToDevice);
                     printf("Starting MAD\n");
-                    g_mad_val_hist_flt<<<gridSizeNoise, blockSizeNoise, mad_precision * sizeof(unsigned int)>>>(d_data_box, data_size, d_bins, d_med_total_values, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
-                    g_mad_val_hist_flt_cpy_nth_bin<<<gridSizeNoise, blockSizeNoise, blockSizeNoise.x * sizeof(float)>>>(d_data_box, data_size, d_median_arr, d_bins, d_med_total_values, d_med_counter, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max); 
+                    //g_mad_val_hist_flt<<<gridSizeNoise, blockSizeNoise, mad_precision * sizeof(unsigned int)>>>(d_data_box, data_size, d_bins, d_med_total_values, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
+                    //g_mad_val_hist_flt_cpy_nth_bin<<<gridSizeNoise, 32, 32 * sizeof(float)>>>(d_data_box, data_size, d_median_arr, d_bins, d_med_total_values, d_med_counter, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max); 
 
                     // unsigned int med_counter;
                     // cudaMemcpy(&med_counter, d_med_counter, sizeof(unsigned int),cudaMemcpyDeviceToHost);
@@ -1469,11 +1614,12 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                     // g_mad_val_hist_flt<<<gridSizeNoise, blockSizeNoise, mad_precision * sizeof(unsigned int)>>>(d_median_arr, med_counter, d_bins, d_med_total_values, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
                     // g_mad_val_hist_flt_cpy_nth_bin<<<gridSizeNoise, blockSizeNoise, blockSizeNoise.x * sizeof(float)>>>(d_data_box, data_size, d_median_arr, d_bins, d_med_total_values, d_med_counter, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
                     
-                    g_mad_val_hist_flt_final_step<<<1,1>>>(d_median_arr, d_med_counter, d_med_total_values, d_bins);
+                    //g_mad_val_hist_flt_final_step<<<1,1>>>(d_median_arr, d_med_counter, d_med_total_values, d_bins);
+                    GPU_MAD(d_data_box, data_size, d_data_duo, snRange, mad_precision, cadence, h_min, h_max);
 
                     cudaDeviceSynchronize();
 
-                    cudaMemcpy(d_data_duo, d_median_arr, 1 * sizeof(float), cudaMemcpyDeviceToDevice);
+                    //cudaMemcpy(d_data_duo, d_median_arr, 1 * sizeof(float), cudaMemcpyDeviceToDevice);
                 }
                 else
                 {
@@ -1533,13 +1679,15 @@ void GPU_DataCube_filter_flt(char *data, char *maskdata, size_t data_size, const
                     // cudaDeviceSynchronize();
 
                     printf("Starting MAD\n");
-                    g_mad_val_hist_flt<<<gridSizeNoise, blockSizeNoise, mad_precision * sizeof(unsigned int)>>>(d_data, data_size, d_bins, d_med_total_values, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
-                    g_mad_val_hist_flt_cpy_nth_bin<<<gridSizeNoise, blockSizeNoise, blockSizeNoise.x * sizeof(float)>>>(d_data, data_size, d_median_arr, d_bins, d_med_total_values, d_med_counter, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
-                    g_mad_val_hist_flt_final_step<<<1,1>>>(d_median_arr, d_med_counter, d_med_total_values, d_bins);
+                    //g_mad_val_hist_flt<<<gridSizeNoise, blockSizeNoise, mad_precision * sizeof(unsigned int)>>>(d_data, data_size, d_bins, d_med_total_values, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
+                    //g_mad_val_hist_flt_cpy_nth_bin<<<gridSizeNoise, 32, 32 * sizeof(float)>>>(d_data, data_size, d_median_arr, d_bins, d_med_total_values, d_med_counter, 0.0f, cadence, range, mad_precision, d_data_min, d_data_max);
+                    //g_mad_val_hist_flt_final_step<<<1,1>>>(d_median_arr, d_med_counter, d_med_total_values, d_bins);
+
+                    GPU_MAD(d_data, data_size, d_data_duo, snRange, mad_precision, cadence, h_min, h_max);
 
                     cudaDeviceSynchronize();
 
-                    cudaMemcpy(d_data_duo, d_median_arr, 1 * sizeof(float), cudaMemcpyDeviceToDevice);
+                    //cudaMemcpy(d_data_duo, d_median_arr, 1 * sizeof(float), cudaMemcpyDeviceToDevice);
                 }
                 else
                 {
@@ -4042,7 +4190,7 @@ __global__ void g_mad_val_hist_flt(float *data, const size_t size, unsigned int 
 
     __syncthreads();
 
-    if (threadIdx.x < precision) // needs at least as many threads as bins
+    if (threadIdx.x < precision)
     {
         int i = threadIdx.x;
         while (i < precision)
@@ -4968,4 +5116,207 @@ void sort_arr_flt(float *arr, size_t size)
             --j;
         }
     }
+}
+
+__global__ void g_bin_data(float *data, const size_t size, unsigned int *bins, const unsigned int precision, const float min_flt, const float max_flt, const int range, const size_t cadence, unsigned int *total_count, bool flag)
+{
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int thread_count = blockDim.x * gridDim.x;
+
+    u_int8_t warpIdx = threadIdx.x / 32;
+    u_int8_t laneIdx = threadIdx.x % 32;    
+    extern __shared__ unsigned int s_data_bin_data[];
+    unsigned int *s_bins = s_data_bin_data + precision * warpIdx; 
+    
+    if (laneIdx < precision)
+    {
+        int i = laneIdx;
+        while (i < precision)
+        {
+            s_bins[i] = 0;
+            i+=32;
+        }
+    }
+
+    const float *ptr = data + size + cadence * index;
+    const float *ptr2 = data + cadence * thread_count - 1;
+    const float my_max = range == 0 ? max(fabs(min_flt), fabs(max_flt)) : (range < 0 ? max(fabs(min_flt), 0.0f) : max(fabs(max_flt), 0.0f));
+    const float bucket_size = flag ? (max_flt - min_flt) / precision : my_max / precision;
+
+
+    while (ptr > ptr2)
+    {
+        ptr -= cadence * thread_count;
+
+        if((range == 0 && IS_NOT_NAN(*ptr)) || (range < 0 && *ptr < 0.0) || (range > 0 && *ptr > 0.0))
+		{
+            if (flag && fabs(*ptr) >= min_flt && fabs(*ptr) <= max_flt)
+            {
+                atomicAdd(s_bins + min((unsigned int)((fabs(*ptr) - min_flt) / bucket_size), precision - 1), 1);
+            }
+            else if (!flag)
+            {
+                atomicAdd(s_bins + min((unsigned int)(fabs(*ptr) / bucket_size), precision - 1), 1);
+            }
+		}
+    }
+
+    __syncthreads();
+
+    size_t localCount = 0;
+    if (laneIdx < precision)
+    {
+        int i = laneIdx;
+        while (i < precision)
+        {
+            localCount += s_bins[i];
+            i+=32;
+        }
+    }
+
+    u_int8_t offset = 2;
+    while (offset <= blockDim.x / 32)
+    {
+        if (warpIdx % offset == 0)
+        {
+            if (laneIdx < precision)
+            {
+                int i = laneIdx;
+                while (i < precision)
+                {
+                    localCount += s_data_bin_data[i + precision * (warpIdx + offset / 2)];
+                    s_bins[i] += s_data_bin_data[i + precision * (warpIdx + offset / 2)];
+                    i+=32;
+                }
+            }
+        }
+        __syncthreads();
+        offset *= 2;
+    }
+
+    if (warpIdx == 0)
+    {
+        for (int offset = 16; offset > 0; offset /= 2)
+        {
+            localCount += __shfl_down_sync(0xffffffff, localCount, offset);
+        }
+    }
+
+    if (warpIdx == 0 && laneIdx < precision)
+    {
+        int i = laneIdx;
+        while (i < precision)
+        {
+            atomicAdd(bins + i, s_bins[i]);
+            i+=32;
+        }
+    }
+
+    if(warpIdx == 0 && laneIdx == 0)
+    {
+        atomicAdd(total_count, localCount);
+    }
+}
+
+__global__ void g_cpy_bin(float *data, const size_t size, float *target_arr, unsigned int *arr_ptr, const float min_flt, const float max_flt, const int range, const size_t cadence)
+{
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int thread_count = blockDim.x * gridDim.x;
+
+    u_int8_t warpIdx = threadIdx.x / 32;
+    u_int8_t laneIdx = threadIdx.x % 32;
+    
+    bool warpTest = true;
+    bool test = true;
+
+    float candidate;
+    u_int8_t flag = 0;
+
+    const float *ptr = data + size + cadence * index;
+    const float *ptr2 = data + cadence * thread_count - 1;
+
+    while (warpTest)
+    {
+        flag = 0;
+        ptr -= cadence * thread_count;
+
+        if (ptr < data) {test = false;}
+
+        if(test && ((range == 0 && IS_NOT_NAN(*ptr)) || (range < 0 && *ptr < 0.0) || (range > 0 && *ptr > 0.0)))
+		{
+            if ((fabs(*ptr) >= min_flt && fabs(*ptr) <= max_flt))
+            {
+			    candidate = fabs(*ptr);
+                flag = 1;
+            }
+            
+		}
+
+        __syncwarp();
+
+        int bitmask = __ballot_sync(0xffffffff, flag);
+
+        unsigned int offset = __popc(bitmask << (32 - laneIdx));
+        unsigned int g_offset = 0;
+
+        if (laneIdx == 31 && bitmask)
+        {
+            g_offset = atomicAdd(arr_ptr, offset + flag);
+        }
+
+        __syncwarp();
+
+        g_offset = __shfl_sync(0xffffffff, g_offset, 31);
+
+        if (flag) {target_arr[g_offset + offset] = candidate;}
+
+        __syncwarp();
+
+        warpTest = __shfl_sync(0xffffffff, test, 31);
+    }
+}
+
+__global__ void g_median_final(float *data, const unsigned int *sizePtr, unsigned int n)
+{
+    int i = 0;
+
+    const unsigned int size = *sizePtr;
+    float *l = data;
+	float *m = data + size - 1;
+	float *ptr = data + n;
+
+    int h = 0;
+    int o = 0;
+    for (int k = 0; k < size; k++)
+    {
+        if (data[k] == 0.0) h++;
+        else o++;
+    }
+
+	while(l < m)
+	{
+		float value = *ptr;
+		float *i = l;
+		float *j = m;
+		
+		do
+		{
+			while(*i < value) ++i;
+			while(value < *j) --j;
+			
+			if(i <= j)
+			{
+				float tmp = *i;
+				*i = *j;
+				*j = tmp;
+				++i;
+				--j;
+			}
+		} while(i <= j);
+		
+		if(j < ptr) l = i;
+		if(ptr < i) m = j;
+	}
+	
+	*data = MAD_TO_STD * *ptr;
 }

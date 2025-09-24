@@ -80,15 +80,15 @@ gcc --std=c99 --pedantic -Wall -Wextra -Wshadow -Wno-unknown-pragmas -Wno-unused
 echo "  Compiling src/Header.c"
 gcc --std=c99 --pedantic -Wall -Wextra -Wshadow -Wno-unknown-pragmas -Wno-unused-function -Wfatal-errors -O3 -o src/Header.o -c src/Header.c
 echo "	Compiling src/Gpu.cu"
-nvcc -dc -O3 -o src/Gpu.o src/Gpu.cu -I/usr/local/cuda-12.1/targets/x86_64-linux/include -rdc=true -lcudadevrt
+nvcc -dc -O3 -o src/Gpu.o src/Gpu.cu -I/usr/local/cuda-13.0/targets/x86_64-linux/include -rdc=true -lcudadevrt
 echo "	Linking src/Gpu.o"
 nvcc -dlink -o src/Gpulink.o src/Gpu.o -lcudadevrt -lcudart
 
 #nvcc -shared -o libgpu.so src/Gpu.o
 echo "  Compiling src/DataCube.c"
-gcc --std=c99 --pedantic -Wall -Wextra -Wshadow -Wno-unknown-pragmas -Wno-unused-function -Wfatal-errors -O3 -I/usr/local/cuda-12.1/targets/x86_64-linux/include -o src/DataCube.o -c src/DataCube.c $1
+gcc --std=c99 --pedantic -Wall -Wextra -Wshadow -Wno-unknown-pragmas -Wno-unused-function -Wfatal-errors -O3 -D_POSIX_C_SOURCE=199309L -I/usr/local/cuda-13.0/targets/x86_64-linux/include -o src/DataCube.o -c src/DataCube.c $1
 echo "  Compiling sofia.c"
-gcc --std=c99 --pedantic -Wall -Wextra -Wshadow -Wno-unknown-pragmas -Wno-unused-function -Wfatal-errors -O3 -o sofia src/common.o src/statistics_flt.o src/statistics_dbl.o src/Table.o src/String.o src/Stack.o src/Path.o src/Array_dbl.o src/Array_siz.o src/Map.o src/Matrix.o src/LinkerPar.o src/Parameter.o src/Flagger.o src/WCS.o src/Header.o src/Source.o src/Catalog.o src/Gpu.o src/Gpulink.o src/DataCube.o sofia.c -lwcs -lcudart -lcudadevrt -lm $1 -L/usr/local/cuda-12.1/targets/x86_64-linux/lib/stubs -L/usr/local/cuda-12.1/targets/x86_64-linux/lib -I/usr/local/cuda-12.1/targets/x86_64-linux/include
+gcc --std=c99 --pedantic -Wall -Wextra -Wshadow -Wno-unknown-pragmas -Wno-unused-function -Wfatal-errors -O3 -o sofia src/common.o src/statistics_flt.o src/statistics_dbl.o src/Table.o src/String.o src/Stack.o src/Path.o src/Array_dbl.o src/Array_siz.o src/Map.o src/Matrix.o src/LinkerPar.o src/Parameter.o src/Flagger.o src/WCS.o src/Header.o src/Source.o src/Catalog.o src/Gpu.o src/Gpulink.o src/DataCube.o sofia.c -lwcs -lcudart -lcudadevrt -lm $1 -L/usr/local/cuda-13.0/targets/x86_64-linux/lib/stubs -L/usr/local/cuda-13.0/targets/x86_64-linux/lib -I/usr/local/cuda-13.0/targets/x86_64-linux/include -lstdc++
 
 
 # Remove object files
