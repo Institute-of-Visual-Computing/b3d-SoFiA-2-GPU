@@ -3952,9 +3952,23 @@ PUBLIC void DataCube_run_scfind(const DataCube *self, DataCube *maskCube, const 
 	//GPU_test_gausfit(self->data, self->data_size, cadence, range);
 	//printf("RMS: %.3e\n", rms);
 	//GPU_test_convolve(self->data, self->data_size, self->axis_size);
-	//GPU_test_median_recursive(self->data, self->data_size, self->axis_size, range);
+	struct timespec my_start_time;
+	struct timespec my_end_time;
 
-	//exit(0);
+	gettimeofday(&my_start_time,NULL);
+	float trueMad = mad_val_flt((float*)self->data, self->data_size, 0.0, 1, 0);
+	printf("True MAD: %.20e\n", trueMad);
+	gettimeofday(&my_end_time,NULL);
+	printf("CPU Took: %lu ns\n", 1000000 * my_end_time.tv_sec + my_end_time.tv_nsec - (1000000 * my_start_time.tv_sec + my_start_time.tv_nsec));
+	printf("CPU Took in Seconds: %lu\n", my_end_time.tv_sec - my_start_time.tv_sec);
+
+	gettimeofday(&my_start_time,NULL);
+	GPU_test_median_recursive(self->data, self->data_size, self->axis_size, 0);
+	gettimeofday(&my_end_time,NULL);
+	printf("GPU Took: %lu ns\n", 1000000 * my_end_time.tv_sec + my_end_time.tv_nsec - (1000000 * my_start_time.tv_sec + my_start_time.tv_nsec));
+	printf("GPU Took in Seconds: %lu\n", my_end_time.tv_sec - my_start_time.tv_sec);
+
+	exit(0);
 
 	if (useGPU)
 	{

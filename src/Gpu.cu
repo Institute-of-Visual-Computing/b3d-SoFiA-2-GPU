@@ -356,10 +356,6 @@ void GPU_test_median_recursive(float *data, size_t size, const size_t *axis_size
     dim3 blockSize(256);
     dim3 gridSize(16);
 
-    float true_rms = mad_val_flt(data, size, 0.0, 1, snRange);
-
-    printf("True RMS: %0.20e\n", true_rms);
-
     int selectedBin = 0;
     unsigned int h_bins[precision];
     unsigned int tmpCount;
@@ -429,6 +425,11 @@ void GPU_test_median_recursive(float *data, size_t size, const size_t *axis_size
             g_cpy_bin<<<gridSize, blockSize>>>(d_data, size, d_med_arr, d_med_ptr, h_min, h_max, snRange, 1);
             g_median_final<<<1,1>>>(d_med_arr, d_med_ptr,  median_counter - h_count);
             cudaDeviceSynchronize();
+            float median;
+            cudaMemcpy(&median, d_med_arr, sizeof(float), cudaMemcpyDeviceToHost);
+            cudaDeviceSynchronize();
+            median /= MAD_TO_STD;
+            printf("Median: %.20e\n", median);
         }
     }
     cudaDeviceSynchronize();

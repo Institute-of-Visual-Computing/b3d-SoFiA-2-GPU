@@ -19,6 +19,7 @@ extern "C" {
 #include "Array_siz.h"
 #include "statistics_dbl.h"
 #include "DataCube.h"
+#include "time.h"
 
 void GPU_test_current();
 
